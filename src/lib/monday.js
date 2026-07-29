@@ -30,7 +30,6 @@ export const COLS = {
   commentsHistory: {
     commentText: "long_text_mm5pz2nk",
     sourceColumn: "text_mm5p9arf",
-    owner: "text_mm5pj9k9",
     originalTimestamp: "date_mm5pbkpp",
     // Columna "Connect boards" (una vía) hacia el board de proyectos.
     // Es la que dice a qué proyecto pertenece cada entrada, y por la que filtra la app.

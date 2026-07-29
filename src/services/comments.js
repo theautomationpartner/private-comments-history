@@ -4,22 +4,27 @@
 
 import mondayLib, { BOARDS, COLS, OWNER_EMAIL } from "../lib/monday";
 
-// Nombre de la columna de monday que alimenta el historial. Se muestra en el subtítulo.
-// Va por variable de entorno porque incluye el nombre de una persona y este repo es público.
-const SOURCE_COLUMN = import.meta.env?.VITE_SOURCE_COLUMN || "Comments";
+// Nombre de la columna de comentarios de la dueña. Va por variable de entorno porque incluye el
+// nombre de una persona y este repo es público.
+const OWNER_COLUMN = import.meta.env?.VITE_SOURCE_COLUMN || "Comments";
 
 /**
- * Secciones de la barra lateral. Hoy solo la primera tiene datos; las otras son la fase 2.
+ * Las cuatro columnas del board de proyectos cuyo historial muestra la app.
  *
- * Los nombres salen de las columnas REALES del board de proyectos (verificadas contra la API).
- * El mockup original decía "Risks" y "Key Risks", pero esa columna no existe: son la misma cosa.
- * Las que sí existen son General Notes, Key Risk y Action Plan.
+ * `sourceColumn` tiene que coincidir EXACTAMENTE con el texto que la automatización de monday
+ * escribe en la columna "Source Column" de cada entrada. Es el único vínculo entre una entrada
+ * del historial y su sección: si no coinciden, la sección aparece vacía aunque haya datos.
+ *
+ * Los nombres salen de las columnas REALES del board (verificadas contra la API). El mockup
+ * original decía "Risks" y "Key Risks": esa primera no existe, son la misma cosa.
+ *
+ * ⚠️ Alcance: solo el board EXTERNO. El Internal queda fuera por definición del cliente.
  */
 export const SECTIONS = [
-  { key: "owner", label: "My Comments", enabled: true, sourceColumn: SOURCE_COLUMN },
-  { key: "notes", label: "General Notes", enabled: false },
-  { key: "keyRisk", label: "Key Risk", enabled: false },
-  { key: "actionPlan", label: "Action Plan", enabled: false },
+  { key: "owner", label: OWNER_COLUMN, sourceColumn: OWNER_COLUMN },
+  { key: "notes", label: "General Notes", sourceColumn: "General Notes" },
+  { key: "actionPlan", label: "Action Plan", sourceColumn: "Action Plan" },
+  { key: "keyRisk", label: "Key Risk", sourceColumn: "Key Risk" },
 ];
 
 // ---- Datos de ejemplo (solo con VITE_MONDAY_MOCK=1) ----
@@ -31,21 +36,31 @@ const MOCK_ENTRIES = [
     id: "m1",
     text: "Supplier confirmed the revised delivery window, but we still need the updated tooling spec before we can commit to the volume discussed in the last review.",
     createdAt: "2026-07-27T08:05:00Z",
+    sourceColumn: OWNER_COLUMN,
   },
   {
     id: "m2",
     text: "Any status report on this? Waiting on numbers.",
     createdAt: "2026-07-27T08:03:00Z",
+    sourceColumn: OWNER_COLUMN,
   },
   {
     id: "m3",
     text: "Please update the timeline and attach the latest deck with the action items.",
     createdAt: "2026-07-26T14:22:00Z",
+    sourceColumn: "Action Plan",
   },
   {
     id: "m4",
     text: "Spec mismatch found during assembly. Need a decision on how we control tolerance.",
     createdAt: "2026-07-20T09:15:00Z",
+    sourceColumn: "Key Risk",
+  },
+  {
+    id: "m5",
+    text: "Scope agreed with the customer: two production lots, first one before the audit.",
+    createdAt: "2026-07-18T11:40:00Z",
+    sourceColumn: "General Notes",
   },
 ];
 
@@ -124,6 +139,7 @@ export async function getCommentHistory() {
         COLS.commentsHistory.originalTimestamp,
         COLS.commentsHistory.linkedItem,
         COLS.commentsHistory.sourceItem,
+        COLS.commentsHistory.sourceColumn,
       ],
     }),
     traerNombreDelItem(itemId),
@@ -154,6 +170,8 @@ export async function getCommentHistory() {
         id: r.id,
         text: val(r.column_values, COLS.commentsHistory.commentText).text || "",
         createdAt: original || r.created_at,
+        // De qué columna del proyecto vino: es lo que separa una sección de otra.
+        sourceColumn: (val(r.column_values, COLS.commentsHistory.sourceColumn).text || "").trim(),
       };
     })
     .filter((e) => e.text.trim())

@@ -17,11 +17,16 @@ import { getCommentHistory, formatDate, formatTime, SECTIONS } from "./services/
 import { useMondayTheme } from "./lib/useMondayTheme";
 import "./App.css";
 
-const COLUMNA_ORIGEN = SECTIONS[0].sourceColumn;
-
 export default function App() {
   const [state, setState] = useState({ status: "loading" });
-  const [section, setSection] = useState("owner");
+  const [section, setSection] = useState(SECTIONS[0].key);
+
+  const seccionActiva = SECTIONS.find((s) => s.key === section) || SECTIONS[0];
+  // Una sola consulta trae el historial completo; separar por columna es filtrar en memoria.
+  // Cambiar de sección no vuelve a pegarle a monday.
+  const entradasDeLaSeccion = (state.entries || []).filter(
+    (e) => e.sourceColumn === seccionActiva.sourceColumn
+  );
 
   // La app va embebida: tiene que seguir el tema de monday (claro / oscuro / negro).
   useMondayTheme();
@@ -39,16 +44,21 @@ export default function App() {
   return (
     <Box padding="medium">
       <Flex direction="column" gap="medium" align="stretch">
-        <Header itemName={state.itemName} />
+        <Header itemName={state.itemName} seccion={seccionActiva} />
         {/* Sin ítem o con error no hay nada que contar: un "0 Total comments" ahí confunde. */}
         {!state.noItem && state.status !== "error" && (
           <SummaryCard
-            count={state.entries?.length}
+            count={entradasDeLaSeccion.length}
             loading={state.status === "loading"}
             isOwner={state.isOwner !== false}
           />
         )}
-        <Body state={state} section={section} onSection={setSection} />
+        <Body
+          state={state}
+          entradas={entradasDeLaSeccion}
+          section={section}
+          onSection={setSection}
+        />
       </Flex>
     </Box>
   );
@@ -58,11 +68,12 @@ export default function App() {
  * Encabezado. El nombre del proyecto va al lado del título, en gris y truncado: adentro de monday
  * el ancho es poco, y un nombre largo no puede empujar al título fuera de la pantalla.
  */
-function Header({ itemName }) {
+function Header({ itemName, seccion }) {
   return (
     <Flex direction="column" gap="xs" align="start">
       <Flex gap="small" align="end" wrap style={{ minWidth: 0 }}>
-        <Heading type="h2">My Comments</Heading>
+        {/* El título es la sección abierta: así el costado se entiende sin explicación. */}
+        <Heading type="h2">{seccion.label}</Heading>
         {itemName ? (
           <Text type="text1" color="secondary" ellipsis style={{ paddingBottom: 2 }}>
             {itemName}
@@ -70,7 +81,7 @@ function Header({ itemName }) {
         ) : null}
       </Flex>
       <Text type="text2" color="secondary">
-        {`Private history of your comments from the "${COLUMNA_ORIGEN}" column.`}
+        {`Private history of the "${seccion.sourceColumn}" column.`}
       </Text>
     </Flex>
   );
@@ -128,48 +139,53 @@ function SummaryCard({ count, loading, isOwner }) {
 }
 
 /** Navegación de secciones + feed. En angosto la navegación se va arriba. */
-function Body({ state, section, onSection }) {
+function Body({ state, entradas, section, onSection }) {
   return (
     <Flex gap="medium" align="start" wrap>
       <Box style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
-        <SectionNav active={section} onSelect={onSection} />
+        <SectionNav active={section} onSelect={onSection} entries={state.entries} />
       </Box>
       <Box style={{ flex: "3 1 320px", minWidth: 0 }}>
-        <Feed state={state} />
+        <Feed state={state} entradas={entradas} />
       </Box>
     </Flex>
   );
 }
 
-function SectionNav({ active, onSelect }) {
+/** Las cuatro columnas, con cuántas entradas tiene cada una. Todas se pueden abrir. */
+function SectionNav({ active, onSelect, entries }) {
   return (
     <Flex direction="column" gap="xs" align="stretch">
       {SECTIONS.map((s) => {
         const isActive = s.key === active;
+        const cuantas = (entries || []).filter((e) => e.sourceColumn === s.sourceColumn).length;
         // El onClick va en el Flex: Box no expone onClick en su API.
         return (
           <Flex
             key={s.key}
             direction="column"
             align="stretch"
-            role={s.enabled ? "button" : undefined}
-            tabIndex={s.enabled ? 0 : undefined}
-            onClick={s.enabled ? () => onSelect(s.key) : undefined}
-            style={{ cursor: s.enabled ? "pointer" : "default", opacity: s.enabled ? 1 : 0.5 }}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelect(s.key)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(s.key)}
+            style={{ cursor: "pointer" }}
           >
             <Box
               padding="small"
               rounded="small"
               backgroundColor={isActive ? "secondaryBackgroundColor" : undefined}
             >
-              <Text
-                type="text2"
-                weight={isActive ? "bold" : "normal"}
-                color={s.enabled ? "primary" : "secondary"}
-              >
-                {s.label}
-                {!s.enabled ? "  ·  soon" : ""}
-              </Text>
+              <Flex gap="small" align="center" justify="space-between">
+                <Text type="text2" weight={isActive ? "bold" : "normal"} ellipsis>
+                  {s.label}
+                </Text>
+                {entries ? (
+                  <Text type="text2" color="secondary">
+                    {cuantas}
+                  </Text>
+                ) : null}
+              </Flex>
             </Box>
           </Flex>
         );
@@ -178,7 +194,7 @@ function SectionNav({ active, onSelect }) {
   );
 }
 
-function Feed({ state }) {
+function Feed({ state, entradas }) {
   if (state.status === "loading") return <FeedSkeleton />;
 
   // Abrir la app fuera de un ítem no es un error del usuario: no lo trates como tal.
@@ -206,21 +222,21 @@ function Feed({ state }) {
       />
     );
 
-  if (!state.entries?.length)
+  if (!entradas.length)
     return (
       <Message
-        title="No comments yet"
-        body="Your comments on this item will appear here, newest first."
+        title="No entries yet"
+        body="Changes to this column will appear here, newest first."
       />
     );
 
   return (
     <Flex direction="column" gap="small" align="stretch">
       <Text type="text1" weight="medium">
-        Comments History
+        History
       </Text>
       <div>
-        {state.entries.map((e) => (
+        {entradas.map((e) => (
           <TimelineRow key={e.id}>
             <Card>
               <Flex direction="column" gap="xs" align="start">

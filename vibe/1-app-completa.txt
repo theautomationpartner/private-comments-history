@@ -99,11 +99,19 @@ Si se usa `text`, new Date() lo interpreta como hora local del navegador y el de
 DOS VECES. En este caso concreto eran 6 horas de error, en una app cuyo sentido son las fechas.
 Los campos `... on DateValue { date time }` tienen el mismo problema que `text`.
 
-function toUtcIso(rawValue) {
+⚠️ Y hay un segundo caso: la columna puede traer FECHA SIN HORA. Eso no es un instante, es un día
+calendario. Si se lo trata como medianoche UTC y después se pasa a hora local, se corre al día
+ANTERIOR en cualquier huso al oeste de Greenwich — el mismo síntoma que veníamos evitando, por
+otra puerta. Por eso la función devuelve además un flag, y se usa mediodía como hora neutra:
+
+function fechaDeColumna(rawValue) {
   if (!rawValue) return null;
   try {
     const { date, time } = JSON.parse(rawValue) || {};
-    return date ? `${date}T${time || "00:00:00"}Z` : null;
+    if (!date) return null;
+    // mediodía, no medianoche: así no se corre de día en ningún huso entre UTC-11 y UTC+11,
+    // que cubre de sobra a los usuarios de esta app (Israel) y a quien la desarrolla (Argentina)
+    return { iso: `${date}T${time || "12:00:00"}Z`, tieneHora: Boolean(time) };
   } catch {
     return null;
   }
@@ -143,7 +151,19 @@ hasta que `cursor` venga null. Poner un tope de 20 páginas como red contra un b
 ⚠️ Esto es paginación INTERNA para juntar todos los datos. NO es paginación en la pantalla: el
 usuario nunca ve botones de "página siguiente" (ver la lista de cosas que NO hacer).
 
-Si en CUALQUIER página `boards` viene como lista vacía → el usuario no tiene acceso (ver más abajo).
+Reglas de las páginas — cada caso tiene una respuesta distinta y NINGUNA es "mostrar lo que junté":
+
+  · `boards` vacío en la PRIMERA página          -> SIN ACCESO (el usuario no está suscripto)
+  · `boards` vacío en una página POSTERIOR       -> ERROR REAL (ya sabemos que tiene acceso; ni
+                                                    mentirle con el cartel de privacidad, ni
+                                                    mostrarle datos incompletos)
+  · `items_page` null pero el board existe       -> esa página trajo cero filas: cortar la
+                                                    paginación y seguir con lo acumulado.
+                                                    NO es sin acceso ni error.
+  · se llega a las 20 páginas y `cursor` sigue
+    sin ser null                                 -> ERROR REAL. Mostrar los datos parciales sería
+                                                    exactamente el bug que esta paginación viene a
+                                                    arreglar, solo que con 10.000 entradas.
 
 --- Consulta del nombre del proyecto (para el encabezado) ---
 
@@ -184,8 +204,10 @@ const val = (cvs, id) => cvs.find((c) => c.id === id) || {};
 //
 // Si `items_page` viene null pero el board existe, tratarlo como lista vacía, NO como error.
 
-if (respuesta?.errors) { /* ERROR REAL */ }
-const board = respuesta?.data?.boards?.[0];
+// OJO: esto es la PRIMERA página. Para las siguientes valen las Reglas de las páginas de
+// más arriba (board vacío en una página posterior es ERROR, no falta de permiso).
+if (primeraRespuesta?.errors) { /* ERROR REAL */ }
+const board = primeraRespuesta?.data?.boards?.[0];
 if (!board) { /* SIN ACCESO */ }
 
 const rows = /* todos los items acumulados de todas las páginas */;
@@ -198,14 +220,18 @@ const filas = rows.filter((r) => {
 });
 
 const entries = filas
+  // Cada entrada lleva `tieneHora` y `sourceItem`: los necesita la pantalla más abajo.
   .map((r) => {
     // si la entrada tiene fecha propia se usa esa; si no, la de creación del ítem
-    const original = toUtcIso(val(r.column_values, COLS.originalTimestamp).value);
+    const original = fechaDeColumna(val(r.column_values, COLS.originalTimestamp).value);
     return {
       id: r.id,
       text: val(r.column_values, COLS.commentText).text || "",
-      createdAt: original || r.created_at,
+      createdAt: original?.iso || r.created_at,
+      // `created_at` del ítem SIEMPRE trae hora, por eso el true cuando no hay fecha propia
+      tieneHora: original ? original.tieneHora : true,
       sourceColumn: (val(r.column_values, COLS.sourceColumn).text || "").trim(),
+      sourceItem: (val(r.column_values, COLS.sourceItem).text || "").trim(),
     };
   })
   // las entradas sin texto se descartan: son eventos de "se vació la columna"
@@ -216,10 +242,17 @@ const entries = filas
 
 // Nombre del proyecto: si el proyecto fue borrado su nombre ya no se puede consultar, pero quedó
 // guardado en la columna Source Item de cada entrada. Se usa como respaldo.
-// ⚠️ Sale de `filas` (las de ESTE ítem), NUNCA de `rows` (el board entero): con `rows[0]` se
-// mostraría el nombre del primer proyecto que devuelva la API, que casi siempre es otro.
-const nombreDeRespaldo = val(filas[0]?.column_values || [], COLS.sourceItem).text;
+// ⚠️ Sale de las ENTRADAS DE ESTE ÍTEM YA ORDENADAS, es decir de la MÁS NUEVA. Nunca de `rows`
+// (el board entero: mostraría el nombre de otro proyecto), ni de la primera fila sin ordenar
+// (si el proyecto se renombró alguna vez, cada entrada guardó el nombre de su época y el que
+// vale es el último).
+const nombreDeRespaldo = entries[0]?.sourceItem || "";
 const nombreDelProyecto = nombreConsultado || nombreDeRespaldo || "";
+
+// Los conteos de la barra lateral y el número grande de la tarjeta salen los DOS de `entries`
+// (ya filtrado por ítem y sin las de texto vacío), para que nunca se contradigan en pantalla.
+// Las entradas cuyo Source Column no coincida exacto con ninguna de las 5 quedan afuera de todo:
+// no se cuentan ni se muestran. Es el comportamiento buscado.
 
 // Solo para el texto del cartel de privacidad, NO es la medida de seguridad.
 // Si el contexto no trae el email (pasa en algunas versiones), pedirlo con: query { me { email } }
@@ -228,7 +261,19 @@ const isOwner = (contexto.user?.email || "").toLowerCase() === OWNER_EMAIL.toLow
 
 Las entradas de la sección abierta se obtienen filtrando en memoria:
   entries.filter((e) => e.sourceColumn === seccionActiva.sourceColumn)
-Cambiar de sección NO debe volver a consultar monday: se consulta una sola vez al abrir la app.
+
+CUÁNDO SE CONSULTA A MONDAY (y cuándo no):
+  · al abrir la app                              -> sí
+  · al cambiar de SECCIÓN                        -> NO, se filtra en memoria (tiene que ser instantáneo)
+  · al cambiar el TEMA                           -> NO
+  · si `monday.listen("context")` entrega un
+    `itemId` distinto al que se está mostrando    -> SÍ: volver al estado CARGANDO y rehacer las
+                                                    dos consultas. La SECCIÓN abierta se
+                                                    CONSERVA: si estaba en Action Plan, el
+                                                    ítem nuevo abre también en Action Plan.
+En una item view el usuario puede navegar a otro ítem con el panel abierto. Sin esto último, la
+app le seguiría mostrando el historial del proyecto ANTERIOR, con su nombre y todo, como si fuera
+el de este.
 
 ===============================================================================
 PANTALLA (una sola). Reproducir EXACTO el look de las capturas adjuntas.
@@ -330,8 +375,8 @@ Textos exactos de cada cartel:
 Mientras el contexto de monday todavía no resolvió, mostrar el estado CARGANDO — nunca
 "No item selected", que aparecería y desaparecería y asusta al usuario.
 
-Si una entrada tiene fecha pero SIN hora, mostrar solo el ícono de calendario con la fecha y
-OMITIR el ícono de reloj: poner "12:00 AM" sería inventar un dato.
+Si una entrada tiene `tieneHora: false`, mostrar solo el ícono de calendario con la fecha y OMITIR
+el ícono de reloj y la hora: poner una hora ahí sería inventar un dato.
 
 ===============================================================================
 ESTILO

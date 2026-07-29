@@ -7,21 +7,21 @@
 
 ## Antes de abrir vibe
 
-### 1. Sacá 4 capturas de pantalla
+### 1. Las capturas van en la carpeta `capturas/`
 
-Abrí **https://private-comments-history-tap-team1.vercel.app/?itemId=3081342422**
-(es el proyecto A401, el que más historial tiene).
+Ahí está el detalle de cuáles faltan y qué tiene que mostrar cada una: ver
+[`capturas/FALTAN-ESTAS-3.md`](capturas/FALTAN-ESTAS-3.md).
 
-⚠️ **Achicá la ventana del navegador antes de capturar** — que quede angosta, más o menos la mitad
-de la pantalla. Adentro de monday la app vive en un panel angosto, y si le mandás capturas de
-pantalla completa, vibe copia un diseño ancho que después no entra.
+Son 5 en total. Dos ya están guardadas; faltan tres.
 
-| Archivo | Qué tiene que mostrar |
-|---|---|
-| `1-seccion-yael.png` | La sección **Yael's Comments** abierta, con la tarjeta de resumen, la barra lateral con los 5 contadores y al menos una tarjeta del feed con su punto violeta |
-| `2-seccion-action-plan.png` | La sección **Action Plan** abierta (tiene 17 entradas): se tiene que ver la línea de tiempo con varias tarjetas conectadas |
-| `3-vacio.png` | Una sección sin entradas, para que se vea el estado *"No entries yet"* |
-| `4-oscuro.png` | Cualquier sección con `&theme=dark` agregado a la URL, para que copie los colores del tema oscuro |
+⚠️ **Dos reglas que ya nos costaron una vuelta:**
+
+1. **Sacá una angosta.** Achicá la ventana a la mitad de la pantalla. Adentro de monday la app vive
+   en un panel angosto; si vibe solo ve capturas a pantalla completa, copia un diseño ancho que
+   después no entra.
+2. **Sacalas AL FINAL, con la app terminada.** Cada vez que se toca la UI, las capturas viejas
+   caducan. Ya pasó: unas capturas mostraban un rótulo que se había cambiado media hora antes, y
+   contradecían el prompt.
 
 ### 2. Creá la app en vibe conectando los DOS boards
 

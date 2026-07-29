@@ -8,12 +8,18 @@ import mondayLib, { BOARDS, COLS, OWNER_EMAIL } from "../lib/monday";
 // Va por variable de entorno porque incluye el nombre de una persona y este repo es público.
 const SOURCE_COLUMN = import.meta.env?.VITE_SOURCE_COLUMN || "Comments";
 
-/** Secciones de la barra lateral. Hoy solo la primera tiene datos. */
+/**
+ * Secciones de la barra lateral. Hoy solo la primera tiene datos; las otras son la fase 2.
+ *
+ * Los nombres salen de las columnas REALES del board de proyectos (verificadas contra la API).
+ * El mockup original decía "Risks" y "Key Risks", pero esa columna no existe: son la misma cosa.
+ * Las que sí existen son General Notes, Key Risk y Action Plan.
+ */
 export const SECTIONS = [
   { key: "owner", label: "My Comments", enabled: true, sourceColumn: SOURCE_COLUMN },
   { key: "notes", label: "General Notes", enabled: false },
-  { key: "risks", label: "Risks", enabled: false },
-  { key: "keyRisks", label: "Key Risks", enabled: false },
+  { key: "keyRisk", label: "Key Risk", enabled: false },
+  { key: "actionPlan", label: "Action Plan", enabled: false },
 ];
 
 // ---- Datos de ejemplo (solo con VITE_MONDAY_MOCK=1) ----
@@ -107,14 +113,21 @@ export async function getCommentHistory() {
       }
     }`;
 
-  const res = await mondayLib.api(query, {
-    board: BOARDS.commentsHistory,
-    cols: [
-      COLS.commentsHistory.commentText,
-      COLS.commentsHistory.originalTimestamp,
-      COLS.commentsHistory.linkedItem,
-    ],
-  });
+  // El nombre del proyecto se pide aparte, contra el board de proyectos. Va en paralelo con el
+  // historial para no sumar espera. Si falla (o el ítem se borró) la app funciona igual: el
+  // encabezado simplemente no muestra el nombre.
+  const [res, nombreDelProyecto] = await Promise.all([
+    mondayLib.api(query, {
+      board: BOARDS.commentsHistory,
+      cols: [
+        COLS.commentsHistory.commentText,
+        COLS.commentsHistory.originalTimestamp,
+        COLS.commentsHistory.linkedItem,
+        COLS.commentsHistory.sourceItem,
+      ],
+    }),
+    traerNombreDelItem(itemId),
+  ]);
 
   // ⚠️ Distinguir "no tenés acceso" de "no hay comentarios" es clave acá, y monday NO da error
   // cuando no tenés permiso: devuelve la lista de boards VACÍA con HTTP 200.
@@ -123,7 +136,7 @@ export async function getCommentHistory() {
   // Sin este chequeo, alguien sin acceso vería "No comments yet", que es una mentira distinta.
   const board = res?.data?.boards?.[0];
   if (!board) {
-    return { entries: [], itemName: ctx.itemName || "", hasAccess: false, isOwner };
+    return { entries: [], itemName: nombreDelProyecto, hasAccess: false, isOwner };
   }
 
   const rows = board.items_page?.items ?? [];
@@ -146,7 +159,42 @@ export async function getCommentHistory() {
     .filter((e) => e.text.trim())
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-  return { entries, itemName: ctx.itemName || "", hasAccess: true, isOwner };
+  // Si el proyecto se borró, su nombre ya no se puede consultar — pero quedó guardado en la
+  // columna Source Item de cada entrada. Ese es justamente el caso para el que la creamos.
+  const nombreDeRespaldo = val(
+    rows[0]?.column_values || [],
+    COLS.commentsHistory.sourceItem
+  ).text;
+
+  return {
+    entries,
+    itemName: nombreDelProyecto || nombreDeRespaldo || "",
+    hasAccess: true,
+    isOwner,
+  };
+}
+
+/**
+ * Nombre del proyecto, para mostrarlo en el encabezado.
+ *
+ * Se consulta a través de `boards` y no de `items` a propósito: el proxy solo deja pasar consultas
+ * de tableros, así que este es el camino permitido. Si algo falla devuelve cadena vacía — el
+ * nombre es decorativo y nunca debe romper la pantalla.
+ */
+async function traerNombreDelItem(itemId) {
+  try {
+    const res = await mondayLib.api(
+      `query ($board: ID!, $item: ID!) {
+         boards(ids: [$board]) {
+           items_page(limit: 1, query_params: { ids: [$item] }) { items { name } }
+         }
+       }`,
+      { board: BOARDS.portfolioExternal, item: String(itemId) }
+    );
+    return res?.data?.boards?.[0]?.items_page?.items?.[0]?.name || "";
+  } catch {
+    return "";
+  }
 }
 
 /**

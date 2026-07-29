@@ -39,7 +39,7 @@ export default function App() {
   return (
     <Box padding="medium">
       <Flex direction="column" gap="medium" align="stretch">
-        <Header />
+        <Header itemName={state.itemName} />
         {/* Sin ítem o con error no hay nada que contar: un "0 Total comments" ahí confunde. */}
         {!state.noItem && state.status !== "error" && (
           <SummaryCard
@@ -54,10 +54,21 @@ export default function App() {
   );
 }
 
-function Header() {
+/**
+ * Encabezado. El nombre del proyecto va al lado del título, en gris y truncado: adentro de monday
+ * el ancho es poco, y un nombre largo no puede empujar al título fuera de la pantalla.
+ */
+function Header({ itemName }) {
   return (
     <Flex direction="column" gap="xs" align="start">
-      <Heading type="h2">My Comments</Heading>
+      <Flex gap="small" align="end" wrap style={{ minWidth: 0 }}>
+        <Heading type="h2">My Comments</Heading>
+        {itemName ? (
+          <Text type="text1" color="secondary" ellipsis style={{ paddingBottom: 2 }}>
+            {itemName}
+          </Text>
+        ) : null}
+      </Flex>
       <Text type="text2" color="secondary">
         {`Private history of your comments from the "${COLUMNA_ORIGEN}" column.`}
       </Text>

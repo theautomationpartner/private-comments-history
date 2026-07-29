@@ -113,14 +113,26 @@ export default async function handler(req, res) {
   }
 
   // `boards` SIEMPRE tiene que venir con un `ids`. Sin esto, `{ boards { id name } }` lista todos
-  // los tableros de la cuenta y se cuela: no lleva ningún número, así que el chequeo de IDs de
-  // abajo no tiene nada que mirar.
-  if (!/\bboards\s*\(\s*[^)]*\bids\b/.test(query)) {
+  // los tableros de la cuenta y se cuela.
+  const argsDeBoards = [...query.matchAll(/\bboards\s*\(([^)]*)\)/g)].map((m) => m[1]);
+  if (!argsDeBoards.length || argsDeBoards.some((a) => !/\bids\b/.test(a))) {
     return res.status(403).json({ error: "Hay que indicar qué tablero se consulta" });
   }
 
-  const idsEnLaConsulta = JSON.stringify({ query, variables }).match(/\d{8,}/g) || [];
-  if (!idsEnLaConsulta.length || idsEnLaConsulta.some((id) => !TABLEROS_PERMITIDOS.includes(id))) {
+  // Se validan SOLO los IDs que van adentro de `boards(...)`, no cualquier número de la consulta:
+  // si validáramos todos, romperíamos cualquier query que lleve el ID de un ítem.
+  // Los `$variables` se resuelven contra el objeto `variables` que mandó el cliente.
+  const tablerosPedidos = argsDeBoards.flatMap((args) => {
+    const literales = args.match(/\d{6,}/g) || [];
+    const porVariable = (args.match(/\$(\w+)/g) || [])
+      .map((v) => variables?.[v.slice(1)])
+      .flatMap((v) => (Array.isArray(v) ? v : [v]))
+      .filter((v) => v != null)
+      .map(String);
+    return [...literales, ...porVariable];
+  });
+
+  if (!tablerosPedidos.length || tablerosPedidos.some((id) => !TABLEROS_PERMITIDOS.includes(id))) {
     return res.status(403).json({ error: "Este proxy solo consulta los tableros de esta app" });
   }
 

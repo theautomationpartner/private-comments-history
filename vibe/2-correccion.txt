@@ -1,0 +1,95 @@
+Corrección puntual. NO reescribas la app ni toques la lógica de datos: la paginación, el filtrado,
+las fechas y el orden están bien y quedan EXACTAMENTE como están. Cambiá solo estos 4 puntos.
+
+===============================================================================
+1. La app arranca mostrando "No item selected" antes de saber si hay ítem
+===============================================================================
+
+El estado inicial tiene `noItem: true`, y el `if (noItem)` corta el render antes de que
+`monday.get("context")` haya resuelto. Resultado: se ve "No item selected" aunque haya un ítem
+abierto.
+
+Cambiar el estado inicial a:
+
+  noItem: false,
+  loading: true,
+
+Y que `noItem: true` se ponga ÚNICAMENTE dentro de `loadData` cuando el contexto ya resolvió y no
+trajo `itemId`. Mientras `loading` sea true, se muestran los skeletons, nunca el cartel de "No item
+selected".
+
+===============================================================================
+2. El tema oscuro no funciona: las clases no coinciden
+===============================================================================
+
+`applyTheme` le pone al <body> las clases `light-app-theme` / `dark-app-theme` / `black-app-theme`,
+pero la hoja de estilos generada define sus colores bajo la clase `.dark`. Nunca se cruzan, así que
+el modo oscuro de monday no cambia nada.
+
+Que `applyTheme` aplique LAS DOS convenciones:
+
+  const applyTheme = (theme) => {
+    const body = document.body;
+    body.classList.remove('light-app-theme', 'dark-app-theme', 'black-app-theme', 'dark');
+    if (theme === 'dark') body.classList.add('dark-app-theme', 'dark');
+    else if (theme === 'black') body.classList.add('black-app-theme', 'dark');
+    else body.classList.add('light-app-theme');
+  };
+
+Y en styles.css, que el fondo y el texto de la página salgan de esas variables, para que no quede
+un marco claro alrededor de la app en modo oscuro:
+
+  body {
+    margin: 0;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+===============================================================================
+3. Si falla la lectura del contexto, la app queda colgada en "No item selected"
+===============================================================================
+
+`monday.get('context').then(...)` no tiene `.catch()`. Si esa promesa rechaza, no se ejecuta nada
+más y la app se queda para siempre mostrando el cartel equivocado, sin ningún error.
+
+Agregarle:
+
+  monday.get('context')
+    .then((context) => { /* lo que ya hace */ })
+    .catch((err) => {
+      if (!unmounted) setState(prev => ({ ...prev, loading: false, error: String(err) }));
+    });
+
+===============================================================================
+4. El listen compara contra un valor viejo
+===============================================================================
+
+Dentro de `monday.listen('context', ...)` se compara `newItemId !== state.itemId`, pero ese
+`state` quedó capturado en el primer render (el `useEffect` tiene `[]` como dependencias), así que
+`state.itemId` vale siempre `null` y la condición da true todas las veces: recarga de más.
+
+Usar una referencia que sí se actualice:
+
+  const itemIdRef = useRef(null);   // arriba, junto a los demás hooks
+
+En `loadData`, apenas se confirma el itemId:  itemIdRef.current = itemId;
+
+Y en el listen:
+
+  if (newItemId !== itemIdRef.current) {
+    loadData(newItemId, newUserEmail, newTheme);
+  } else {
+    applyTheme(newTheme);
+    setState(prev => ({ ...prev, theme: newTheme, userEmail: newUserEmail }));
+  }
+
+===============================================================================
+NO TOCAR
+===============================================================================
+
+- La paginación con cursor y sus reglas de error.
+- `fechaDeColumna`, el flag `tieneHora` y el formateo de fecha/hora.
+- El filtrado por `linked_item_ids`, el orden, ni el desempate por id.
+- El nombre de respaldo desde `entries[0].sourceItem`.
+- Los textos de la interfaz.
+- No agregar pantallas, botones, ni nada que escriba en monday.

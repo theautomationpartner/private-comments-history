@@ -182,13 +182,19 @@ export async function getCommentHistory() {
   const entries = filas
     .map((r) => {
       // Si la entrada viene de la migración usa su fecha original; si no, la de creación.
-      const original = toUtcIso(val(r.column_values, COLS.commentsHistory.originalTimestamp).value);
+      const original = fechaDeColumna(val(r.column_values, COLS.commentsHistory.originalTimestamp).value);
       return {
         id: r.id,
         text: val(r.column_values, COLS.commentsHistory.commentText).text || "",
-        createdAt: original || r.created_at,
+        createdAt: original?.iso || r.created_at,
+        // Una fecha SIN hora no es un instante, es un día. Si la tratáramos como instante
+        // (medianoche UTC), al pasarla a hora local se correría al día anterior. Este flag
+        // deja mostrar solo la fecha, sin inventar un "12:00 AM".
+        tieneHora: original ? original.tieneHora : true,
         // De qué columna del proyecto vino: es lo que separa una sección de otra.
         sourceColumn: (val(r.column_values, COLS.commentsHistory.sourceColumn).text || "").trim(),
+        // El nombre del proyecto tal como estaba cuando se guardó la entrada.
+        sourceItem: (val(r.column_values, COLS.commentsHistory.sourceItem).text || "").trim(),
       };
     })
     .filter((e) => e.text.trim())
@@ -201,12 +207,10 @@ export async function getCommentHistory() {
   // Si el proyecto se borró, su nombre ya no se puede consultar — pero quedó guardado en la
   // columna Source Item de cada entrada. Ese es justamente el caso para el que la creamos.
   //
-  // 🔴 Sale de `filas` (las de ESTE ítem), NO de `rows` (el board entero). Con `rows[0]` se
-  // mostraba el nombre del primer proyecto que devolviera la API — casi siempre otro.
-  const nombreDeRespaldo = val(
-    filas[0]?.column_values || [],
-    COLS.commentsHistory.sourceItem
-  ).text;
+  // 🔴 Sale de las entradas de ESTE ítem, no del board entero (con `rows[0]` se mostraba el
+  // nombre de otro proyecto). Y de la entrada MÁS NUEVA: si el proyecto se renombró alguna vez,
+  // cada entrada guardó el nombre de su época, y el que vale es el último.
+  const nombreDeRespaldo = entries[0]?.sourceItem || "";
 
   return {
     entries,
@@ -234,15 +238,30 @@ async function traerTodasLasPaginas(query, { board, cols }, topeDePaginas = 20) 
 
   for (let pagina = 0; pagina < topeDePaginas; pagina++) {
     const res = await mondayLib.api(query, { board, cols, cursor });
+
+    // Un `errors` en la respuesta es un fallo real (query inválida, límite de complejidad),
+    // NO falta de permiso. monday devuelve 200 en los dos casos.
+    if (res?.errors) throw new Error("La consulta a monday devolvió errores");
+
     const tablero = res?.data?.boards?.[0];
-    if (!tablero) return { hayAcceso: false, items: [] };
+    if (!tablero) {
+      // Board vacío en la PRIMERA página = el usuario no está suscripto al board privado.
+      // En una página posterior es un fallo a mitad de camino: ya sabemos que tiene acceso,
+      // así que devolver "sin acceso" sería mentirle, y devolver lo acumulado sería mostrar
+      // datos incompletos como si fueran todos.
+      if (pagina === 0) return { hayAcceso: false, items: [] };
+      throw new Error("La consulta se cortó a mitad de camino");
+    }
 
     items.push(...(tablero.items_page?.items ?? []));
     cursor = tablero.items_page?.cursor || null;
-    if (!cursor) break;
+    if (!cursor) return { hayAcceso: true, items };
   }
 
-  return { hayAcceso: true, items };
+  // Se acabaron las páginas permitidas y todavía queda cursor: los datos están incompletos.
+  // Mostrarlos igual sería el mismo error que veníamos arreglando —la app miente sin avisar—
+  // solo que con 10.000 entradas en vez de 200.
+  throw new Error("El historial es más grande de lo que la app puede traer");
 }
 
 /**
@@ -280,11 +299,15 @@ async function traerNombreDelItem(itemId) {
  * aplica dos veces. Con la app corriendo en un huso y la usuaria en otro, eso son 6 horas de error
  * en una app cuyo sentido son justamente las fechas. Siempre `value` para fechas.
  */
-function toUtcIso(rawValue) {
+function fechaDeColumna(rawValue) {
   if (!rawValue) return null;
   try {
     const { date, time } = JSON.parse(rawValue) || {};
-    return date ? `${date}T${time || "00:00:00"}Z` : null;
+    if (!date) return null;
+    // Sin hora, la columna guarda un DÍA, no un instante. Se usa mediodía en vez de medianoche
+    // para que al convertir a la hora local no se corra de día en ningún huso del planeta; el
+    // flag `tieneHora` es lo que impide mostrar esa hora inventada.
+    return { iso: `${date}T${time || "12:00:00"}Z`, tieneHora: Boolean(time) };
   } catch {
     return null;
   }

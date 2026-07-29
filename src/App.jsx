@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { Box, Flex, Text, Heading, Skeleton, Divider } from "@vibe/core";
 import { Comment, Locked, Calendar, Time } from "@vibe/icons";
 import { getCommentHistory, formatDate, formatTime, SECTIONS } from "./services/comments";
+import mondayLib from "./lib/monday";
 import { useMondayTheme } from "./lib/useMondayTheme";
 import "./App.css";
 
@@ -31,15 +32,33 @@ export default function App() {
   // La app va embebida: tiene que seguir el tema de monday (claro / oscuro / negro).
   useMondayTheme();
 
+  // `itemId` en el estado y no una constante: en una item view el usuario puede navegar a otro
+  // ítem con el panel abierto. Si no lo escucháramos, seguiríamos mostrando el historial del
+  // proyecto anterior — con su nombre y todo — como si fuera el de este.
+  const [itemId, setItemId] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    mondayLib.getContext().then((ctx) => vivo && setItemId(ctx?.itemId ?? null));
+    const dejarDeEscuchar = mondayLib.onContextChange((ctx) => {
+      if (vivo && ctx?.itemId) setItemId(ctx.itemId);
+    });
+    return () => {
+      vivo = false;
+      if (typeof dejarDeEscuchar === "function") dejarDeEscuchar();
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
+    setState({ status: "loading" });
     getCommentHistory()
       .then((data) => alive && setState({ status: "ready", ...data }))
       .catch((e) => alive && setState({ status: "error", message: String(e.message || e) }));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [itemId]);
 
   return (
     <Box padding="medium">
@@ -245,7 +264,10 @@ function Feed({ state, entradas }) {
               <Flex direction="column" gap="xs" align="start">
                 <Flex gap="medium" align="center" wrap>
                   <Meta icon={<Calendar size={16} />} text={formatDate(e.createdAt)} />
-                  <Meta icon={<Time size={16} />} text={formatTime(e.createdAt)} />
+                  {/* Sin hora guardada, mostrar una sería inventarla: se omite el reloj. */}
+                  {e.tieneHora !== false ? (
+                    <Meta icon={<Time size={16} />} text={formatTime(e.createdAt)} />
+                  ) : null}
                 </Flex>
                 <Text type="text1" style={{ whiteSpace: "pre-wrap" }}>
                   {e.text}

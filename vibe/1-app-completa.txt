@@ -109,11 +109,17 @@ function toUtcIso(rawValue) {
   }
 }
 
---- Consulta principal ---
+--- Consulta principal: HAY QUE PAGINAR CON CURSOR ---
 
-query ($board: ID!, $cols: [String!]) {
+El board de historial acumula UNA entrada por cada cambio de CADA una de las 5 columnas de TODOS
+los proyectos: es el board que más crece del sistema. Si se usa un `limit` fijo sin paginar, los
+proyectos cuyas entradas caigan fuera de esa primera página muestran "No entries yet" — o sea, la
+app MIENTE y no aparece ningún error. Ya pasó: con 209 entradas y limit 200, 9 quedaban invisibles.
+
+query ($board: ID!, $cols: [String!], $cursor: String) {
   boards(ids: [$board]) {
-    items_page(limit: 200) {
+    items_page(limit: 500, cursor: $cursor) {
+      cursor
       items {
         id
         created_at
@@ -128,7 +134,16 @@ query ($board: ID!, $cols: [String!]) {
   }
 }
 
-Variables: board = BOARD_HISTORIAL, cols = los 5 column_id de la tabla de arriba.
+Variables: board = BOARD_HISTORIAL, cols = los 5 column_id de la tabla de arriba, cursor = null
+en la primera llamada.
+
+Hay que repetir la consulta pasando el `cursor` que devolvió la anterior, acumulando los `items`,
+hasta que `cursor` venga null. Poner un tope de 20 páginas como red contra un bucle infinito.
+
+⚠️ Esto es paginación INTERNA para juntar todos los datos. NO es paginación en la pantalla: el
+usuario nunca ve botones de "página siguiente" (ver la lista de cosas que NO hacer).
+
+Si en CUALQUIER página `boards` viene como lista vacía → el usuario no tiene acceso (ver más abajo).
 
 --- Consulta del nombre del proyecto (para el encabezado) ---
 
@@ -139,30 +154,50 @@ query ($board: ID!, $item: ID!) {
 }
 
 Variables: board = BOARD_PROYECTOS, item = el itemId del contexto.
-Si esta consulta falla, devolver cadena vacía: el nombre es decorativo y nunca debe romper la
-pantalla. Las dos consultas se lanzan en paralelo (Promise.all).
+
+Esta consulta va envuelta en try/catch y devuelve cadena vacía si falla: el nombre es decorativo y
+nunca debe romper la pantalla.
+
+⚠️ Las dos consultas van en paralelo, pero OJO: `Promise.all` rechaza si CUALQUIERA rechaza. Si la
+del nombre falla, tumbaría también la principal y la app mostraría "Something went wrong" por un
+dato decorativo. Escribirlo así:
+
+  const [historial, nombre] = await Promise.all([
+    traerTodasLasPaginas(...),
+    traerNombreDelItem(itemId).catch(() => ""),
+  ]);
 
 --- Procesamiento (transcribir tal cual) ---
 
 const val = (cvs, id) => cvs.find((c) => c.id === id) || {};
 
-// IMPORTANTE: distinguir "no tenés acceso" de "no hay datos".
-// monday NO da error cuando no tenés permiso sobre un board privado: devuelve la lista de boards
-// VACÍA con HTTP 200. Sin este chequeo, un usuario sin acceso vería "no hay comentarios", que es
-// una mentira distinta.
+// IMPORTANTE: hay TRES situaciones distintas y monday responde 200 en todas. Distinguirlas en
+// este orden exacto:
+//
+//   1) la promesa rechaza, O la respuesta trae `errors`   -> ERROR REAL ("Something went wrong")
+//      (monday devuelve 200 con { data: null, errors: [...] } ante una query inválida o un límite
+//       de complejidad; si eso se confunde con lo de abajo, se le muestra "no tenés permiso" a
+//       alguien que sí tiene permiso)
+//   2) `data.boards` es una lista VACÍA                    -> SIN ACCESO ("This information is private")
+//      (es como monday responde cuando el usuario no está suscripto al board privado)
+//   3) el board vino pero no hay entradas de este ítem     -> SIN ENTRADAS ("No entries yet")
+//
+// Si `items_page` viene null pero el board existe, tratarlo como lista vacía, NO como error.
+
+if (respuesta?.errors) { /* ERROR REAL */ }
 const board = respuesta?.data?.boards?.[0];
-if (!board) {
-  // sin acceso -> mostrar el estado "This information is private"
-}
+if (!board) { /* SIN ACCESO */ }
 
-const rows = board.items_page?.items ?? [];
+const rows = /* todos los items acumulados de todas las páginas */;
 
-const entries = rows
-  // solo las entradas vinculadas al ítem que está abierto
-  .filter((r) => {
-    const link = val(r.column_values, COLS.linkedItem);
-    return (link.linked_item_ids || []).map(String).includes(String(itemId));
-  })
+// Primero se filtran las filas de ESTE ítem. Todo lo que venga después tiene que salir de acá:
+// `rows` es el board entero, y usarlo por error trae datos de otros proyectos.
+const filas = rows.filter((r) => {
+  const link = val(r.column_values, COLS.linkedItem);
+  return (link.linked_item_ids || []).map(String).includes(String(itemId));
+});
+
+const entries = filas
   .map((r) => {
     // si la entrada tiene fecha propia se usa esa; si no, la de creación del ítem
     const original = toUtcIso(val(r.column_values, COLS.originalTimestamp).value);
@@ -175,15 +210,20 @@ const entries = rows
   })
   // las entradas sin texto se descartan: son eventos de "se vació la columna"
   .filter((e) => e.text.trim())
-  // de la más nueva a la más vieja
-  .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // de la más nueva a la más vieja. El desempate por id evita que dos entradas del mismo segundo
+  // (o del mismo día, si la fecha guardada no trae hora) salgan en distinto orden en cada carga.
+  .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt) || Number(b.id) - Number(a.id));
 
 // Nombre del proyecto: si el proyecto fue borrado su nombre ya no se puede consultar, pero quedó
 // guardado en la columna Source Item de cada entrada. Se usa como respaldo.
-const nombreDeRespaldo = val(rows[0]?.column_values || [], COLS.sourceItem).text;
+// ⚠️ Sale de `filas` (las de ESTE ítem), NUNCA de `rows` (el board entero): con `rows[0]` se
+// mostraría el nombre del primer proyecto que devuelva la API, que casi siempre es otro.
+const nombreDeRespaldo = val(filas[0]?.column_values || [], COLS.sourceItem).text;
 const nombreDelProyecto = nombreConsultado || nombreDeRespaldo || "";
 
-// Solo para el texto del cartel de privacidad, NO es la medida de seguridad:
+// Solo para el texto del cartel de privacidad, NO es la medida de seguridad.
+// Si el contexto no trae el email (pasa en algunas versiones), pedirlo con: query { me { email } }
+// Si aun así no se consigue, tratar isOwner como false: se muestra el texto neutro.
 const isOwner = (contexto.user?.email || "").toLowerCase() === OWNER_EMAIL.toLowerCase();
 
 Las entradas de la sección abierta se obtienen filtrando en memoria:
@@ -205,7 +245,9 @@ De arriba hacia abajo:
 2. TARJETA DE RESUMEN (una sola tarjeta, dos mitades con un divisor vertical en el medio)
    - Mitad izquierda: un cuadrado redondeado violeta claro con un ícono de comentario adentro,
      al lado un número grande (la cantidad de entradas de la sección abierta) y debajo, en gris,
-     el texto "Total comments".
+     el rótulo: la palabra "In" seguida del nombre de la sección abierta. Ejemplos literales:
+     "In Yael's Comments", "In Action Plan". El rótulo tiene que nombrar la sección porque el
+     número cambia al cambiar de sección: con un rótulo tipo "Total" se lee como un bug.
    - Mitad derecha: el mismo cuadrado violeta con un ícono de candado, al lado dos líneas:
        si el usuario es la dueña:  "Only visible to you"  /  "Private and secure"
        si no:                      "Private history"      /  "Visible to board subscribers only"
@@ -225,24 +267,71 @@ De arriba hacia abajo:
      - una fila con un ícono de calendario + la fecha, y un ícono de reloj + la hora
      - debajo, el texto del comentario, respetando los saltos de línea
 
-   Formato de fecha y hora, en inglés de Estados Unidos:
-     fecha:  "July 27, 2026"   (mes completo, día, año)
-     hora:   "10:15 AM"
+   FORMATO DE FECHA Y HORA — leer completo, acá es fácil equivocarse por horas.
+
+   El dato guardado es un instante en UTC (por eso se usa `value` y no `text`). Ese instante se
+   muestra en la HORA LOCAL DE QUIEN MIRA, usando toLocaleDateString / toLocaleTimeString con
+   locale "en-US" y SIN pasar `timeZone`:
+
+     new Date("2026-07-27T08:05:08Z").toLocaleDateString("en-US",
+       { month: "long", day: "numeric", year: "numeric" })   ->  "July 27, 2026"
+     new Date("2026-07-27T08:05:08Z").toLocaleTimeString("en-US",
+       { hour: "numeric", minute: "2-digit" })               ->  "5:05 AM" en Argentina (UTC-3)
+                                                                 "11:05 AM" en Israel (UTC+3)
+
+   Es correcto y buscado que dos personas en husos distintos vean horas distintas: cada una ve la
+   hora que era PARA ELLA. Lo que NO puede pasar es que el desfase se aplique dos veces, y eso es
+   lo que ocurre si se parte de `text` en vez de `value`.
+
+   Los usuarios de esta app están en Israel; quien la desarrolla, en Argentina. Si al comparar
+   contra monday las horas dan corridas exactamente 3 o 6 horas, se usó `text`.
 
 ===============================================================================
-ESTADOS (cada uno con su propio mensaje: no son todos "error")
+ESTADOS — qué se muestra EXACTAMENTE en cada uno
 ===============================================================================
 
-CARGANDO      -> skeletons con la misma forma de las tarjetas
-SIN ÍTEM      -> título "No item selected"
-                 texto  "Open this app from a monday item to see its comment history."
-SIN ACCESO    -> título "This information is private"
-                 texto  "Only the owner of these comments can see this history."
-                 (cuando boards viene vacío; NO mostrar conteos ni fechas)
-SIN ENTRADAS  -> título "No entries yet"
-                 texto  "Changes to this column will appear here, newest first."
-ERROR REAL    -> título "Something went wrong"
-                 texto  "We couldn't load your comments. Please try again."
+Ninguno de estos estados reemplaza la pantalla entera salvo donde se aclara. El cartel va SIEMPRE
+dentro del área del feed (a la derecha), con el mismo aspecto de tarjeta que las del historial.
+
+Tabla: para cada estado, qué se dibuja de cada parte.
+
+  Estado         Encabezado   Tarjeta resumen   Barra lateral        Feed
+  -------------  -----------  ----------------  -------------------  --------------------------
+  CARGANDO       sí           sí, con skeleton  sí, sin los números  3 skeletons de tarjeta
+                              en el número      todavía
+  SIN ENTRADAS   sí           sí (muestra 0)    sí, con números      cartel "No entries yet"
+  SIN ACCESO     sí, SIN el   NO se dibuja      NO se dibuja         cartel, ocupando todo el ancho
+                 nombre del
+                 proyecto
+  ERROR REAL     sí           NO se dibuja      NO se dibuja         cartel, ocupando todo el ancho
+  SIN ÍTEM       sí           NO se dibuja      NO se dibuja         cartel, ocupando todo el ancho
+
+Textos exactos de cada cartel:
+
+  SIN ÍTEM      título "No item selected"
+                texto  "Open this app from a monday item to see its comment history."
+
+  SIN ACCESO    título "This information is private"
+                texto  "Only the owner of these comments can see this history."
+                ⚠️ En este estado NO puede aparecer NINGÚN número ni fecha: por eso desaparecen la
+                tarjeta de resumen y la barra lateral (que muestra conteos). Tampoco el nombre del
+                proyecto, porque no hay entradas de donde sacarlo.
+
+  SIN ENTRADAS  título "No entries yet"
+                texto  "Changes to this column will appear here, newest first."
+                Es POR SECCIÓN: si el proyecto tiene 12 entradas en "General Notes" y 0 en la
+                sección abierta, se muestra este cartel Y la barra lateral sigue mostrando el 12.
+                Eso es correcto y buscado.
+
+  ERROR REAL    título "Something went wrong"
+                texto  "We couldn't load your comments. Please try again."
+                Sin botón de reintentar: se recarga la app. (No agregar el botón.)
+
+Mientras el contexto de monday todavía no resolvió, mostrar el estado CARGANDO — nunca
+"No item selected", que aparecería y desaparecería y asusta al usuario.
+
+Si una entrada tiene fecha pero SIN hora, mostrar solo el ícono de calendario con la fecha y
+OMITIR el ícono de reloj: poner "12:00 AM" sería inventar un dato.
 
 ===============================================================================
 ESTILO
@@ -253,10 +342,28 @@ ESTILO
 - Diseño fluido: porcentajes, flex y grid. NADA de anchos fijos en píxeles. La app corre embebida
   en un iframe angosto dentro de un ítem.
 - Sin scroll horizontal de página.
-- Los colores salen de los tokens de Vibe, para que funcione en los TRES temas de monday: claro,
-  oscuro y negro. La app tiene que leer context.theme y aplicar el tema correspondiente, y
-  reaccionar si el usuario lo cambia con la app abierta. El fondo de la página también, no solo
-  los componentes.
+- TEMA (esto NO se puede deducir de las capturas, seguir al pie de la letra):
+  monday tiene TRES temas y `context.theme` vale exactamente "light", "dark" o "black".
+
+  Usar componentes de Vibe NO alcanza. Los colores de Vibe son variables CSS definidas bajo estas
+  clases, y si no se pone ninguna la app queda SIEMPRE clara — o sea, un bloque blanco en medio de
+  un monday oscuro:
+
+      theme "light"  ->  clase "light-app-theme"
+      theme "dark"   ->  clase "dark-app-theme"
+      theme "black"  ->  clase "black-app-theme"
+
+  Hay que ponerle esa clase al <body> (o al contenedor raíz), sacando antes las otras dos.
+
+  Además el <body> necesita sus propios colores, porque la página no es un componente de Vibe:
+      body { margin: 0;
+             background: var(--primary-background-color);
+             color: var(--primary-text-color); }
+  Sin esto queda un marco blanco alrededor de la app en modo oscuro.
+
+  Y hay que REACCIONAR a los cambios en vivo: `monday.get("context")` resuelve una sola vez, así
+  que además hay que suscribirse con `monday.listen("context", cb)` y volver a aplicar la clase
+  cuando el usuario cambia de tema con la app abierta.
 - ÚNICA excepción de color: el violeta de acento (#6c5ce7) para los cuadraditos de los íconos y
   los puntos de la línea de tiempo. Sobre fondo oscuro usar un violeta más claro (#a29bfe), porque
   el original queda apagado.
@@ -281,7 +388,13 @@ RECORDATORIO FINAL (lo más importante de todo)
 ===============================================================================
 
 1. SOLO LECTURA. Ninguna mutation, nunca.
-2. Para las fechas, usar `value` y no `text`. Es un error de 6 horas que no se ve en pantalla.
-3. Si boards viene vacío es FALTA DE PERMISO, no falta de datos. Son mensajes distintos.
-4. Las 5 cadenas de Source Column se comparan exactas, con apóstrofe y mayúsculas.
-5. Interfaz en inglés. Tema claro, oscuro y negro. Item view.
+2. PAGINAR el board de historial con `cursor` hasta que venga null. Con un límite fijo, los
+   proyectos que queden afuera muestran "No entries yet" y nadie se entera.
+3. Para las fechas, usar `value` y no `text`, y mostrarlas en la hora local de quien mira. Usar
+   `text` da un error de 3 a 6 horas que en pantalla parece razonable.
+4. `errors` en la respuesta = ERROR REAL. `boards` vacío = SIN PERMISO. Son mensajes distintos.
+5. El nombre de respaldo del proyecto sale de las filas YA FILTRADAS por ítem, nunca de `rows[0]`.
+6. Las 5 cadenas de Source Column se comparan exactas, con apóstrofe y mayúsculas. Fueron copiadas
+   crudas desde la API, no tipeadas a mano: el apóstrofe de "Yael's Comments" es el ASCII (').
+7. El tema se aplica poniendo la clase de Vibe en el <body>, y hay que escuchar los cambios.
+8. Interfaz en inglés. Item view. Sin escrituras.

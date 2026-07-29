@@ -1,0 +1,54 @@
+Tres cambios, todos de presentación. NO toques el JavaScript de datos: la paginación, el filtrado,
+las fechas, el orden y los textos quedan exactamente como están.
+
+===============================================================================
+CAMBIO 1 — styles.css: las tarjetas no tienen fondo ni borde
+===============================================================================
+
+styles.css usa nombres de variables CSS de monday que NO existen en esta app. Cuando una variable
+CSS no existe, la declaración entera se descarta: el fondo queda transparente y el borde desaparece
+por completo. Por eso las tarjetas se ven como texto suelto.
+
+Las variables que SÍ existen son las definidas en el :root del proyecto, y van envueltas en hsl().
+
+Hacé este reemplazo en TODO styles.css, en todas las apariciones:
+
+  var(--primary-background-hover-color)   ->   hsl(var(--card))
+  var(--ui-border-color)                  ->   hsl(var(--border))
+  var(--primary-text-color)               ->   hsl(var(--foreground))
+  var(--secondary-text-color)             ->   hsl(var(--muted-foreground))
+  var(--disabled-background-color)        ->   hsl(var(--muted))
+
+Y verificá que estas tres reglas queden con el borde bien declarado:
+
+  .entry-card   { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); }
+  .summary-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); }
+  .empty-card   { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); }
+
+===============================================================================
+CAMBIO 2 — styles.css: la tipografía
+===============================================================================
+
+En la regla `body`, la línea `font-family: var(--font-family);` apunta a una variable que no existe.
+Reemplazala por la tipografía de monday, para que la app se vea parte del producto y no de otra web:
+
+  font-family: Figtree, Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+===============================================================================
+CAMBIO 3 — App.jsx: sacar el diagnóstico temporal
+===============================================================================
+
+Eliminá por completo:
+
+- El bloque <pre> con {JSON.stringify(state.contextoCrudo, null, 2)} que está dentro del estado
+  "No item selected".
+- El campo `contextoCrudo: null` del useState inicial.
+- Las dos líneas `setState(prev => ({ ...prev, contextoCrudo: context }));` — una está en el .then
+  de monday.get('context') y la otra en el callback de monday.listen('context').
+
+Era para depurar y ya cumplió su función. El resto de esa pantalla (título, subtítulo y el cartel
+"No item selected") queda igual.
+
+===============================================================================
+
+Eso es todo. No agregues pantallas, botones, ni nada que escriba en monday.

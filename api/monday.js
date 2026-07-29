@@ -39,6 +39,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Falta 'query'" });
   }
 
+  // 🔒 SOLO LECTURA. Esta app nunca escribe en monday, así que el proxy tampoco debe dejar.
+  //
+  // Importa porque este endpoint queda accesible en internet: el token que usa es personal y
+  // arrastra los permisos de su dueño (incluida la ESCRITURA — monday no permite emitir tokens
+  // de solo lectura). Sin este filtro, cualquiera que descubra la URL podría modificar o borrar
+  // datos del cliente. Con el filtro, el peor caso es que lean.
+  //
+  // Se bloquea por palabra clave y no por parseo del GraphQL a propósito: es una lista blanca de
+  // hecho —solo pasan queries— y no depende de entender toda la gramática.
+  if (/\bmutation\b/i.test(query)) {
+    return res.status(403).json({ error: "Este proxy es de solo lectura" });
+  }
+
   try {
     const r = await fetch("https://api.monday.com/v2", {
       method: "POST",

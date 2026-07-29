@@ -120,10 +120,16 @@ export async function getCommentHistory() {
   }
 
   // ⚠️ Pedimos `value` además de `text` por la fecha: ver toUtcIso() más abajo.
+  //
+  // 🔴 Y paginamos con `cursor`. El board de historial acumula UNA entrada por cada cambio de
+  // CADA columna de TODOS los proyectos: es el que más crece. Con un `limit` fijo, los proyectos
+  // cuyas entradas caen fuera de la primera página muestran "No entries yet" — o sea, la app
+  // miente sin dar ningún error. Ya estaba pasando: el board tenía 209 entradas y el límite era 200.
   const query = `
-    query ($board: ID!, $cols: [String!]) {
+    query ($board: ID!, $cols: [String!], $cursor: String) {
       boards(ids: [$board]) {
-        items_page(limit: 200) {
+        items_page(limit: 500, cursor: $cursor) {
+          cursor
           items {
             id
             created_at
@@ -141,17 +147,16 @@ export async function getCommentHistory() {
   // El nombre del proyecto se pide aparte, contra el board de proyectos. Va en paralelo con el
   // historial para no sumar espera. Si falla (o el ítem se borró) la app funciona igual: el
   // encabezado simplemente no muestra el nombre.
-  const [res, nombreDelProyecto] = await Promise.all([
-    mondayLib.api(query, {
-      board: BOARDS.commentsHistory,
-      cols: [
-        COLS.commentsHistory.commentText,
-        COLS.commentsHistory.originalTimestamp,
-        COLS.commentsHistory.linkedItem,
-        COLS.commentsHistory.sourceItem,
-        COLS.commentsHistory.sourceColumn,
-      ],
-    }),
+  const cols = [
+    COLS.commentsHistory.commentText,
+    COLS.commentsHistory.originalTimestamp,
+    COLS.commentsHistory.linkedItem,
+    COLS.commentsHistory.sourceItem,
+    COLS.commentsHistory.sourceColumn,
+  ];
+
+  const [historial, nombreDelProyecto] = await Promise.all([
+    traerTodasLasPaginas(query, { board: BOARDS.commentsHistory, cols }),
     traerNombreDelItem(itemId),
   ]);
 
@@ -160,19 +165,21 @@ export async function getCommentHistory() {
   //   · boards vacío        → el usuario no está suscripto al board privado → sin acceso
   //   · boards con 0 ítems  → tiene acceso, pero este ítem no tiene comentarios
   // Sin este chequeo, alguien sin acceso vería "No comments yet", que es una mentira distinta.
-  const board = res?.data?.boards?.[0];
-  if (!board) {
+  if (!historial.hayAcceso) {
     return { entries: [], itemName: nombreDelProyecto, hasAccess: false, isOwner };
   }
 
-  const rows = board.items_page?.items ?? [];
+  const rows = historial.items;
   const val = (cvs, id) => cvs.find((c) => c.id === id) || {};
 
-  const entries = rows
-    .filter((r) => {
-      const link = val(r.column_values, COLS.commentsHistory.linkedItem);
-      return (link.linked_item_ids || []).map(String).includes(String(itemId));
-    })
+  // Primero se filtran las filas de ESTE ítem. Todo lo que venga después tiene que salir de acá:
+  // `rows` es el board entero, y usarlo por error trae datos de otros proyectos.
+  const filas = rows.filter((r) => {
+    const link = val(r.column_values, COLS.commentsHistory.linkedItem);
+    return (link.linked_item_ids || []).map(String).includes(String(itemId));
+  });
+
+  const entries = filas
     .map((r) => {
       // Si la entrada viene de la migración usa su fecha original; si no, la de creación.
       const original = toUtcIso(val(r.column_values, COLS.commentsHistory.originalTimestamp).value);
@@ -185,12 +192,19 @@ export async function getCommentHistory() {
       };
     })
     .filter((e) => e.text.trim())
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // De la más nueva a la más vieja. El desempate por id evita que dos entradas del mismo
+    // segundo (o del mismo día, si la fecha no trae hora) salgan en orden distinto en cada carga.
+    .sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || Number(b.id) - Number(a.id)
+    );
 
   // Si el proyecto se borró, su nombre ya no se puede consultar — pero quedó guardado en la
   // columna Source Item de cada entrada. Ese es justamente el caso para el que la creamos.
+  //
+  // 🔴 Sale de `filas` (las de ESTE ítem), NO de `rows` (el board entero). Con `rows[0]` se
+  // mostraba el nombre del primer proyecto que devolviera la API — casi siempre otro.
   const nombreDeRespaldo = val(
-    rows[0]?.column_values || [],
+    filas[0]?.column_values || [],
     COLS.commentsHistory.sourceItem
   ).text;
 
@@ -200,6 +214,35 @@ export async function getCommentHistory() {
     hasAccess: true,
     isOwner,
   };
+}
+
+/**
+ * Trae TODAS las páginas del board de historial, siguiendo el `cursor`.
+ *
+ * 🔴 Por qué no alcanza con un `limit` grande: el board acumula una entrada por cada cambio de
+ * cada columna de cada proyecto. Crece para siempre. El día que pase el límite, los proyectos
+ * que queden afuera muestran "No entries yet" — la app miente y no hay ningún error que lo avise.
+ *
+ * Devuelve { hayAcceso, items }. La distinción importa: `boards: []` significa SIN PERMISO, no
+ * "sin datos" (monday responde 200 en los dos casos).
+ *
+ * El tope de páginas es una red contra un bucle infinito si la API devolviera siempre cursor.
+ */
+async function traerTodasLasPaginas(query, { board, cols }, topeDePaginas = 20) {
+  const items = [];
+  let cursor = null;
+
+  for (let pagina = 0; pagina < topeDePaginas; pagina++) {
+    const res = await mondayLib.api(query, { board, cols, cursor });
+    const tablero = res?.data?.boards?.[0];
+    if (!tablero) return { hayAcceso: false, items: [] };
+
+    items.push(...(tablero.items_page?.items ?? []));
+    cursor = tablero.items_page?.cursor || null;
+    if (!cursor) break;
+  }
+
+  return { hayAcceso: true, items };
 }
 
 /**

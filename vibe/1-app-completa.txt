@@ -1,0 +1,287 @@
+LEER PRIMERO — INSTRUCCIONES DURAS
+
+Construí EXACTO lo que dice este mensaje. No reescribas la lógica, no la "mejores", no agregues
+pantallas ni funciones. No inventes board IDs ni column IDs: usá SOLO los que están más abajo.
+La app es de SOLO LECTURA: no debe escribir absolutamente nada en monday.
+Toda la interfaz va en INGLÉS.
+
+Es una app de tipo ITEM VIEW: se abre dentro de un ítem de un board.
+
+===============================================================================
+QUÉ ES LA APP
+===============================================================================
+
+Las columnas de texto de monday se reemplazan en cada edición: no guardan versiones. Un board de
+proyectos tiene 5 columnas de texto donde el equipo escribe seguimiento, y una automatización de
+monday va guardando cada cambio como un ítem nuevo en un board privado de historial.
+
+Esta app se abre dentro de un proyecto y muestra ese historial, separado por columna de origen.
+La app NO genera el historial: solo lo lee. La automatización ya existe y ya está funcionando.
+
+===============================================================================
+BOARDS Y COLUMNAS (IDs reales — usar exactamente estos)
+===============================================================================
+
+BOARD 1 — "Portfolio Overview - External", id 5097507296
+Es el board de proyectos. La app se abre dentro de sus ítems. Solo se lee el NOMBRE del ítem.
+
+BOARD 2 — "Comments History", id 5101177080
+Es el board privado donde vive el historial. Una entrada = un cambio de columna.
+Columnas:
+
+  column_id                  tipo             título                          para qué
+  -------------------------  ---------------  ------------------------------  ----------------------------
+  long_text_mm5pz2nk         long_text        Comment Text                    el texto que se muestra
+  text_mm5p9arf              text             Source Column                   de qué columna vino
+  date_mm5pbkpp              date             Original Timestamp              cuándo se escribió
+  board_relation_mm5pk9rd    board_relation   Portfolio Overview - External    a qué proyecto pertenece
+  text_mm5q4sh               text             Source Item                      nombre del proyecto (texto)
+
+===============================================================================
+LAS 5 SECCIONES
+===============================================================================
+
+La app tiene una barra lateral con 5 secciones. Cada una muestra las entradas de UNA columna de
+origen. Se distinguen por el valor EXACTO de la columna "Source Column" (text_mm5p9arf):
+
+  Etiqueta que se muestra    Valor exacto de Source Column
+  -------------------------  ------------------------------
+  Yael's Comments            Yael's Comments
+  General Notes              General Notes
+  Action Plan                Action Plan
+  Key Risk                   Key Risk
+  Project Owner Comments     Project Owner Comments
+
+Esas cadenas deben compararse tal cual, respetando mayúsculas, espacios y el apóstrofe.
+La sección que arranca abierta es "Yael's Comments".
+
+===============================================================================
+LÓGICA DE DATOS — TRANSCRIBIR ESTE CÓDIGO, NO REESCRIBIRLO
+===============================================================================
+
+Usá monday.api() del SDK oficial (monday-sdk-js) para todas las consultas. NO uses fetch directo,
+NO uses BoardSDK.executeGraphQL(), NO uses tokens: dentro de monday la autenticación es por sesión.
+
+El itemId sale del contexto: monday.get("context") devuelve { itemId, theme, user: { email } }.
+
+--- Constantes ---
+
+const BOARD_PROYECTOS = "5097507296";
+const BOARD_HISTORIAL = "5101177080";
+
+const COLS = {
+  commentText: "long_text_mm5pz2nk",
+  sourceColumn: "text_mm5p9arf",
+  originalTimestamp: "date_mm5pbkpp",
+  linkedItem: "board_relation_mm5pk9rd",
+  sourceItem: "text_mm5q4sh",
+};
+
+const OWNER_EMAIL = "yael.katzir-levy@bsci.com";
+
+const SECTIONS = [
+  { key: "owner",        label: "Yael's Comments",        sourceColumn: "Yael's Comments" },
+  { key: "notes",        label: "General Notes",          sourceColumn: "General Notes" },
+  { key: "actionPlan",   label: "Action Plan",            sourceColumn: "Action Plan" },
+  { key: "keyRisk",      label: "Key Risk",               sourceColumn: "Key Risk" },
+  { key: "projectOwner", label: "Project Owner Comments", sourceColumn: "Project Owner Comments" },
+];
+
+--- Conversión de fechas: usar SIEMPRE `value`, NUNCA `text` ---
+
+Esto es crítico y está verificado contra la API de monday. En una columna de tipo date:
+
+  value  ->  {"date":"2026-07-27","time":"08:05:08"}   <- UTC real
+  text   ->  "2026-07-27 05:05"                        <- YA convertido al huso de quien consulta,
+                                                          y sin ningún indicador de zona
+
+Si se usa `text`, new Date() lo interpreta como hora local del navegador y el desfasaje se aplica
+DOS VECES. En este caso concreto eran 6 horas de error, en una app cuyo sentido son las fechas.
+Los campos `... on DateValue { date time }` tienen el mismo problema que `text`.
+
+function toUtcIso(rawValue) {
+  if (!rawValue) return null;
+  try {
+    const { date, time } = JSON.parse(rawValue) || {};
+    return date ? `${date}T${time || "00:00:00"}Z` : null;
+  } catch {
+    return null;
+  }
+}
+
+--- Consulta principal ---
+
+query ($board: ID!, $cols: [String!]) {
+  boards(ids: [$board]) {
+    items_page(limit: 200) {
+      items {
+        id
+        created_at
+        column_values(ids: $cols) {
+          id
+          text
+          value
+          ... on BoardRelationValue { linked_item_ids }
+        }
+      }
+    }
+  }
+}
+
+Variables: board = BOARD_HISTORIAL, cols = los 5 column_id de la tabla de arriba.
+
+--- Consulta del nombre del proyecto (para el encabezado) ---
+
+query ($board: ID!, $item: ID!) {
+  boards(ids: [$board]) {
+    items_page(limit: 1, query_params: { ids: [$item] }) { items { name } }
+  }
+}
+
+Variables: board = BOARD_PROYECTOS, item = el itemId del contexto.
+Si esta consulta falla, devolver cadena vacía: el nombre es decorativo y nunca debe romper la
+pantalla. Las dos consultas se lanzan en paralelo (Promise.all).
+
+--- Procesamiento (transcribir tal cual) ---
+
+const val = (cvs, id) => cvs.find((c) => c.id === id) || {};
+
+// IMPORTANTE: distinguir "no tenés acceso" de "no hay datos".
+// monday NO da error cuando no tenés permiso sobre un board privado: devuelve la lista de boards
+// VACÍA con HTTP 200. Sin este chequeo, un usuario sin acceso vería "no hay comentarios", que es
+// una mentira distinta.
+const board = respuesta?.data?.boards?.[0];
+if (!board) {
+  // sin acceso -> mostrar el estado "This information is private"
+}
+
+const rows = board.items_page?.items ?? [];
+
+const entries = rows
+  // solo las entradas vinculadas al ítem que está abierto
+  .filter((r) => {
+    const link = val(r.column_values, COLS.linkedItem);
+    return (link.linked_item_ids || []).map(String).includes(String(itemId));
+  })
+  .map((r) => {
+    // si la entrada tiene fecha propia se usa esa; si no, la de creación del ítem
+    const original = toUtcIso(val(r.column_values, COLS.originalTimestamp).value);
+    return {
+      id: r.id,
+      text: val(r.column_values, COLS.commentText).text || "",
+      createdAt: original || r.created_at,
+      sourceColumn: (val(r.column_values, COLS.sourceColumn).text || "").trim(),
+    };
+  })
+  // las entradas sin texto se descartan: son eventos de "se vació la columna"
+  .filter((e) => e.text.trim())
+  // de la más nueva a la más vieja
+  .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+// Nombre del proyecto: si el proyecto fue borrado su nombre ya no se puede consultar, pero quedó
+// guardado en la columna Source Item de cada entrada. Se usa como respaldo.
+const nombreDeRespaldo = val(rows[0]?.column_values || [], COLS.sourceItem).text;
+const nombreDelProyecto = nombreConsultado || nombreDeRespaldo || "";
+
+// Solo para el texto del cartel de privacidad, NO es la medida de seguridad:
+const isOwner = (contexto.user?.email || "").toLowerCase() === OWNER_EMAIL.toLowerCase();
+
+Las entradas de la sección abierta se obtienen filtrando en memoria:
+  entries.filter((e) => e.sourceColumn === seccionActiva.sourceColumn)
+Cambiar de sección NO debe volver a consultar monday: se consulta una sola vez al abrir la app.
+
+===============================================================================
+PANTALLA (una sola). Reproducir EXACTO el look de las capturas adjuntas.
+===============================================================================
+
+De arriba hacia abajo:
+
+1. ENCABEZADO
+   - Título grande: el nombre de la sección abierta (cambia al cambiar de sección).
+   - Al lado del título, en gris y más chico: el nombre del proyecto. Se corta con puntos
+     suspensivos si es largo (el ancho dentro de monday es acotado).
+   - Debajo, texto secundario: Private history of the "<nombre de la columna>" column.
+
+2. TARJETA DE RESUMEN (una sola tarjeta, dos mitades con un divisor vertical en el medio)
+   - Mitad izquierda: un cuadrado redondeado violeta claro con un ícono de comentario adentro,
+     al lado un número grande (la cantidad de entradas de la sección abierta) y debajo, en gris,
+     el texto "Total comments".
+   - Mitad derecha: el mismo cuadrado violeta con un ícono de candado, al lado dos líneas:
+       si el usuario es la dueña:  "Only visible to you"  /  "Private and secure"
+       si no:                      "Private history"      /  "Visible to board subscribers only"
+   - Las dos mitades se apilan una debajo de la otra cuando falta ancho.
+   - Esta tarjeta NO se muestra cuando hay error ni cuando no hay ítem abierto.
+
+3. CUERPO: barra lateral a la izquierda + feed a la derecha. En anchos chicos la barra lateral
+   pasa arriba del feed.
+
+   BARRA LATERAL: las 5 secciones, una debajo de la otra. Cada fila muestra la etiqueta a la
+   izquierda y, a la derecha en gris, cuántas entradas tiene esa sección. La sección abierta va
+   en negrita y con un fondo suave. Todas son clickeables y accesibles con el teclado.
+
+   FEED: título "History" y debajo las tarjetas, en LÍNEA DE TIEMPO: a la izquierda de cada
+   tarjeta hay un punto violeta, y una línea vertical fina que conecta un punto con el siguiente
+   (la última tarjeta no lleva línea hacia abajo). Cada tarjeta contiene:
+     - una fila con un ícono de calendario + la fecha, y un ícono de reloj + la hora
+     - debajo, el texto del comentario, respetando los saltos de línea
+
+   Formato de fecha y hora, en inglés de Estados Unidos:
+     fecha:  "July 27, 2026"   (mes completo, día, año)
+     hora:   "10:15 AM"
+
+===============================================================================
+ESTADOS (cada uno con su propio mensaje: no son todos "error")
+===============================================================================
+
+CARGANDO      -> skeletons con la misma forma de las tarjetas
+SIN ÍTEM      -> título "No item selected"
+                 texto  "Open this app from a monday item to see its comment history."
+SIN ACCESO    -> título "This information is private"
+                 texto  "Only the owner of these comments can see this history."
+                 (cuando boards viene vacío; NO mostrar conteos ni fechas)
+SIN ENTRADAS  -> título "No entries yet"
+                 texto  "Changes to this column will appear here, newest first."
+ERROR REAL    -> título "Something went wrong"
+                 texto  "We couldn't load your comments. Please try again."
+
+===============================================================================
+ESTILO
+===============================================================================
+
+- Componentes de Vibe (@vibe/core) para todo. Densidad compacta, como monday: nada de paddings
+  gigantes ni tipografías de landing page.
+- Diseño fluido: porcentajes, flex y grid. NADA de anchos fijos en píxeles. La app corre embebida
+  en un iframe angosto dentro de un ítem.
+- Sin scroll horizontal de página.
+- Los colores salen de los tokens de Vibe, para que funcione en los TRES temas de monday: claro,
+  oscuro y negro. La app tiene que leer context.theme y aplicar el tema correspondiente, y
+  reaccionar si el usuario lo cambia con la app abierta. El fondo de la página también, no solo
+  los componentes.
+- ÚNICA excepción de color: el violeta de acento (#6c5ce7) para los cuadraditos de los íconos y
+  los puntos de la línea de tiempo. Sobre fondo oscuro usar un violeta más claro (#a29bfe), porque
+  el original queda apagado.
+
+===============================================================================
+QUÉ **NO** HACER
+===============================================================================
+
+- NO agregar un botón de "New Comment" ni ninguna forma de escribir. La app es de solo lectura.
+- NO mostrar una etiqueta "Edited" en las tarjetas.
+- NO agregar login, ni pantalla de configuración, ni selector de board.
+- NO reconstruir el chrome de monday (barra lateral de la cuenta, header, árbol de boards):
+  monday ya lo dibuja alrededor de la app.
+- NO crear un modo mock ni datos de ejemplo: la app siempre lee del board real.
+- NO usar tokens de API, ni variables de entorno, ni un proxy: dentro de monday la autenticación
+  es por sesión.
+- NO agregar paginación, filtros, búsqueda ni exportación.
+- NO mostrar quién escribió cada entrada: ese dato no existe en el board.
+
+===============================================================================
+RECORDATORIO FINAL (lo más importante de todo)
+===============================================================================
+
+1. SOLO LECTURA. Ninguna mutation, nunca.
+2. Para las fechas, usar `value` y no `text`. Es un error de 6 horas que no se ve en pantalla.
+3. Si boards viene vacío es FALTA DE PERMISO, no falta de datos. Son mensajes distintos.
+4. Las 5 cadenas de Source Column se comparan exactas, con apóstrofe y mayúsculas.
+5. Interfaz en inglés. Tema claro, oscuro y negro. Item view.

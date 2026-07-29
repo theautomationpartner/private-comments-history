@@ -51,6 +51,7 @@ export default function App() {
             count={entradasDeLaSeccion.length}
             loading={state.status === "loading"}
             isOwner={state.isOwner !== false}
+            seccion={seccionActiva}
           />
         )}
         <Body
@@ -98,7 +99,7 @@ function IconChip({ children }) {
  * El texto de privacidad cambia según quién mira: decirle "Only visible to you" a un
  * administrador suscripto al board sería mentirle.
  */
-function SummaryCard({ count, loading, isOwner }) {
+function SummaryCard({ count, loading, isOwner, seccion }) {
   return (
     <Card>
       <Flex gap="medium" align="center" wrap>
@@ -112,8 +113,10 @@ function SummaryCard({ count, loading, isOwner }) {
             ) : (
               <Heading type="h1">{count ?? 0}</Heading>
             )}
+            {/* El número es el de la sección abierta, así que el rótulo la nombra.
+                Antes decía "Total comments" y cambiaba al clickear el costado: se leía como un bug. */}
             <Text type="text2" color="secondary">
-              Total comments
+              {`In ${seccion.label}`}
             </Text>
           </Flex>
         </Flex>

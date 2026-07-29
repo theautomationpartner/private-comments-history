@@ -106,8 +106,12 @@ export async function getCommentHistory() {
   }
 
   // Aviso amable para quien no es la dueña (no es la medida de seguridad).
-  const email = (ctx.user && ctx.user.email) || "";
-  const isOwner = email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  //
+  // ⚠️ El contexto de monday NO trae el email: `context.user` tiene id, isAdmin, isGuest,
+  // isViewOnly, countryCode, currentLanguage, timeFormat y timeZoneOffset — nada más
+  // (verificado en la doc oficial de monday.get("context")). Hay que pedirlo aparte.
+  const email = (ctx.user && ctx.user.email) || (await traerEmailDelUsuario());
+  const isOwner = Boolean(email) && email.toLowerCase() === OWNER_EMAIL.toLowerCase();
 
   // ⚠️ Requiere la columna "Linked Item" (Connect boards) en el board de historial.
   // Todavía no existe: hay que crearla desde la interfaz de monday.
@@ -262,6 +266,24 @@ async function traerTodasLasPaginas(query, { board, cols }, topeDePaginas = 20) 
   // Mostrarlos igual sería el mismo error que veníamos arreglando —la app miente sin avisar—
   // solo que con 10.000 entradas en vez de 200.
   throw new Error("El historial es más grande de lo que la app puede traer");
+}
+
+/**
+ * Email de quien está mirando. Solo sirve para elegir el texto del cartel de privacidad: la
+ * seguridad real la da el permiso del board, del lado del servidor.
+ *
+ * Solo se consulta DENTRO de monday. Afuera pasaría por el proxy, que únicamente deja pasar
+ * consultas de `boards` — y con razón: no queremos que un endpoint público pueda averiguar
+ * quién es el dueño del token.
+ */
+async function traerEmailDelUsuario() {
+  if (!mondayLib.INSIDE_MONDAY) return "";
+  try {
+    const res = await mondayLib.api("query { me { email } }");
+    return res?.data?.me?.email || "";
+  } catch {
+    return "";
+  }
 }
 
 /**

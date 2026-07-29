@@ -1,0 +1,36 @@
+Un solo cambio. No toques la lógica de datos ni nada más.
+
+El contexto de monday NO incluye el email del usuario: el objeto `context.user` trae id, isAdmin,
+isGuest, isViewOnly, countryCode, currentLanguage, timeFormat y timeZoneOffset, pero no email.
+Por eso `context?.user?.email` siempre devuelve vacío y `isOwner` nunca es true.
+
+Hay que pedirlo con una consulta aparte.
+
+En App.jsx, agregá esta función junto a las otras consultas:
+
+  const fetchUserEmail = async () => {
+    try {
+      const result = await monday.api(`query { me { email } }`);
+      return result?.data?.me?.email || '';
+    } catch {
+      return '';
+    }
+  };
+
+Y en `loadData`, sumala al Promise.all que ya existe:
+
+  const [historyResult, nombreConsultado, emailDelUsuario] = await Promise.all([
+    fetchAllPages(),
+    fetchProjectName().catch(() => ''),
+    fetchUserEmail(),
+  ]);
+
+Después, en el setState del final de loadData (el que hoy guarda entries y projectName), guardá
+también el email:
+
+  userEmail: emailDelUsuario,
+
+El `userEmail` que hoy llega por parámetro a loadData desde el contexto ya no sirve para nada:
+puede quedar, pero el que manda es el que devuelve la consulta.
+
+Si la consulta falla, queda cadena vacía y la app muestra el texto neutro. No debe romper nada.

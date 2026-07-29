@@ -1,0 +1,14 @@
+En App.jsx, reemplazá la función `applyTheme` completa por esta:
+
+  const applyTheme = (theme) => {
+    const body = document.body;
+    body.classList.remove('light-app-theme', 'dark-app-theme', 'black-app-theme', 'dark');
+    if (theme === 'dark') body.classList.add('dark-app-theme', 'dark');
+    else if (theme === 'black') body.classList.add('black-app-theme', 'dark');
+    else body.classList.add('light-app-theme');
+  };
+
+Motivo: la hoja de estilos define los colores oscuros bajo la clase `.dark`, pero la función solo
+aplicaba `dark-app-theme`. Como nunca se cruzaban, el modo oscuro no cambiaba nada.
+
+Es el único cambio. No toques nada más.

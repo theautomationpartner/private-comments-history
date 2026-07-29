@@ -1,0 +1,12 @@
+En styles.css, agregá esta regla al final:
+
+  body {
+    margin: 0;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+Motivo: los componentes se adaptan al tema pero el fondo de la página no, y en modo oscuro queda
+un marco claro alrededor de la app.
+
+Es el único cambio. No toques nada más.

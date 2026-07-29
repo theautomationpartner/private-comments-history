@@ -1,0 +1,10 @@
+En App.jsx, la llamada `monday.get('context').then(...)` no tiene manejo de error: si esa promesa
+falla, la app se queda colgada mostrando el cartel equivocado y sin ningún aviso.
+
+Agregale un `.catch` al final de esa cadena:
+
+  .catch((err) => {
+    if (!unmounted) setState(prev => ({ ...prev, loading: false, error: String(err) }));
+  });
+
+Es el único cambio. No toques nada más.

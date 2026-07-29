@@ -1,0 +1,12 @@
+En App.jsx, el estado inicial del useState tiene `noItem: true`. Cambialo a `noItem: false`.
+
+Y adentro de `loadData`, la línea que hoy dice:
+
+  if (!itemId) {
+    setState(prev => ({ ...prev, loading: false, noItem: true }));
+    return;
+  }
+
+dejala igual: ahí sí corresponde poner noItem en true.
+
+Es el único cambio. No toques nada más.

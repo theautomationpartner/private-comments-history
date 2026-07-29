@@ -62,7 +62,33 @@ LÓGICA DE DATOS — TRANSCRIBIR ESTE CÓDIGO, NO REESCRIBIRLO
 Usá monday.api() del SDK oficial (monday-sdk-js) para todas las consultas. NO uses fetch directo,
 NO uses BoardSDK.executeGraphQL(), NO uses tokens: dentro de monday la autenticación es por sesión.
 
-El itemId sale del contexto: monday.get("context") devuelve { itemId, theme, user: { email } }.
+--- El contexto viene ENVUELTO: los campos están adentro de `.data` ---
+
+🔴 Esto es lo más fácil de errar de toda la app, y si se erra NO FUNCIONA NADA: el itemId queda
+undefined y la app muestra "No item selected" para siempre, sin ningún error.
+
+Lo que llega, tal cual, verificado en producción:
+
+  {
+    "method": "listen",
+    "type": "context",
+    "data": {
+      "viewType": "item-view",
+      "itemId": "3081412888",
+      "user": { "id": "104447703", "name": "...", "email": "..." },
+      "account": { "id": "35352802", "name": "Sonivie" }
+    }
+  }
+
+O sea: `res.itemId` es undefined; el bueno es `res.data.itemId`. Vale para las DOS vías,
+`monday.get("context")` y `monday.listen("context", ...)`. Desenvolvelo siempre así:
+
+  const context = res?.data || res || {};
+  const itemId  = context.itemId || null;
+  const theme   = context.theme || 'light';
+  const email   = context.user?.email || '';
+
+El `|| res` es a propósito: funciona venga envuelto o no.
 
 --- Constantes ---
 

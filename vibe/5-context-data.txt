@@ -1,0 +1,54 @@
+Un solo cambio, y es el que hace que la app funcione.
+
+El contexto de monday viene ENVUELTO: lo que llega es
+
+  { "method": "listen", "type": "context", "data": { "itemId": "...", "user": {...} } }
+
+y el código lo lee de la raíz (`context.itemId`), por eso siempre da undefined. Los campos están
+adentro de `.data`.
+
+CAMBIO 1 — en el .then de monday.get('context'):
+
+De:
+  .then((context) => {
+    if (unmounted) return;
+    const itemId = context?.itemId || null;
+    const theme = context?.theme || 'light';
+    const userEmail = context?.user?.email || '';
+
+A:
+  .then((res) => {
+    if (unmounted) return;
+    const context = res?.data || res || {};
+    const itemId = context.itemId || null;
+    const theme = context.theme || 'light';
+    const userEmail = context.user?.email || '';
+
+(el resto del bloque queda igual)
+
+CAMBIO 2 — en monday.listen('context', ...):
+
+De:
+  const unsubscribe = monday.listen('context', (context) => {
+    if (unmounted) return;
+    const newItemId = context?.itemId || null;
+    const newTheme = context?.theme || 'light';
+    const newUserEmail = context?.user?.email || '';
+
+A:
+  const unsubscribe = monday.listen('context', (res) => {
+    if (unmounted) return;
+    const context = res?.data || res || {};
+    const newItemId = context.itemId || null;
+    const newTheme = context.theme || 'light';
+    const newUserEmail = context.user?.email || '';
+
+(el resto del bloque queda igual)
+
+CAMBIO 3 — guardá también el contexto ya desenvuelto para el diagnóstico:
+
+  setState(prev => ({ ...prev, contextoCrudo: context }));
+
+El `res?.data || res` es a propósito: funciona tanto si viene envuelto como si no.
+
+No toques nada más: ni la lógica de datos, ni la paginación, ni las fechas, ni los textos.

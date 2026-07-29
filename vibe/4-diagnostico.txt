@@ -1,0 +1,19 @@
+Cambio temporal de diagnóstico. No toques nada más.
+
+En la pantalla de "No item selected", debajo del texto que ya está, agregá el contenido completo
+del contexto de monday, en letra chica, gris y monoespaciada, con los saltos de línea respetados:
+
+  <pre style={{ fontSize: 11, color: '#888', textAlign: 'left', whiteSpace: 'pre-wrap',
+                marginTop: 24, maxWidth: '100%', overflowWrap: 'anywhere' }}>
+    {JSON.stringify(contextoCrudo, null, 2)}
+  </pre>
+
+Para eso guardá el contexto completo en el estado apenas lo recibís:
+
+- en el useState inicial agregá:   contextoCrudo: null,
+- dentro del .then de monday.get('context'), antes de llamar a loadData, agregá:
+      setState(prev => ({ ...prev, contextoCrudo: context }));
+- y en el listen, lo mismo cada vez que llega un contexto nuevo.
+
+Es temporal: sirve para ver qué campos trae realmente el contexto y con qué nombres. Se saca
+después.

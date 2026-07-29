@@ -1,0 +1,24 @@
+# Copiar como .gitignore en la raíz del proyecto.
+# CLAVE DE SEGURIDAD: el token de monday NUNCA se commitea.
+
+# Secretos / entorno (NUNCA subir)
+# El patrón amplio cubre .env, .env.local, .env.production, .env.development, etc.
+# (con solo ".env" NO se ignoraría .env.production, y ahí se filtra el token)
+.env*
+# ...excepto la plantilla sin secretos, que SÍ tiene que ir al repo:
+!.env.example
+
+# Dependencias y builds
+node_modules/
+dist/
+.vercel/
+
+# Editor / SO
+.DS_Store
+*.log
+.vercel
+
+# Documentacion interna con datos del cliente: NO va al repo publico
+PLAN.md
+CLAUDE.md
+migrar-historial.mjs

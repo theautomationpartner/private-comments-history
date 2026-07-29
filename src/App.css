@@ -1,0 +1,98 @@
+/* App.css — SOLO lo que @vibe/core no resuelve: la línea de tiempo y el color de acento.
+ *
+ * Regla que seguimos: fondos, textos y bordes salen de los tokens de Vibe (variables que ya
+ * cambian solas con el tema claro/oscuro/negro). Acá abajo NO hay ni un hex de fondo ni de texto.
+ * El violeta es un acento de marca puntual — la excepción, no la regla — y se usa únicamente en
+ * los circulitos de los íconos y en los puntos de la línea de tiempo.
+ */
+
+:root {
+  --pch-accent: #6c5ce7;
+  /* Fondo del acento con transparencia: deja pasar el fondo real que pone Vibe. */
+  --pch-accent-soft: rgba(108, 92, 231, 0.14);
+}
+
+/* Sobre fondo oscuro ese violeta queda apagado y con poco contraste.
+   Vibe marca el tema con estas clases en el <body> (lo hace useMondayTheme.js). */
+.dark-app-theme,
+.black-app-theme {
+  --pch-accent: #a29bfe;
+  --pch-accent-soft: rgba(162, 155, 254, 0.18);
+}
+
+/* El fondo de la página también tiene que seguir el tema: si no, en modo oscuro queda un
+   marco blanco alrededor de la app. Los dos valores son tokens de Vibe, no hex fijos.
+   `margin: 0` saca el margen que traen los navegadores por defecto — adentro de monday el
+   espacio es escaso y ese margen se nota. */
+body {
+  margin: 0;
+  background: var(--primary-background-color);
+  color: var(--primary-text-color);
+}
+
+/* Circulito con el ícono adentro (el del contador y el del candado). */
+.pch-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--pch-accent-soft);
+  color: var(--pch-accent);
+}
+
+/* --- Línea de tiempo ---
+   Cada fila = riel (punto + línea) + tarjeta. El riel se estira a la altura de la fila, así la
+   línea queda continua entre tarjetas sin usar posicionamiento absoluto (que se rompe al
+   cambiar de ancho). */
+.pch-row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.pch-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  width: 10px;
+}
+
+.pch-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 20px;
+  border-radius: 50%;
+  background: var(--pch-accent);
+}
+
+.pch-line {
+  flex: 1;
+  width: 2px;
+  margin-top: 4px;
+  background: var(--pch-accent-soft);
+}
+
+/* La última fila no lleva línea: no hay nada más abajo que conectar. */
+.pch-row:last-child .pch-line {
+  display: none;
+}
+
+/* El espacio entre tarjetas va ACÁ adentro y no como gap del contenedor,
+   para que el riel lo atraviese y la línea no quede cortada. */
+.pch-card-wrap {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 12px;
+}
+
+/* Los íconos chiquitos de fecha y hora acompañan al texto secundario. */
+.pch-meta-icon {
+  display: flex;
+  align-items: center;
+  color: var(--secondary-text-color);
+}

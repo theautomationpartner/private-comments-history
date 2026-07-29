@@ -10,9 +10,9 @@
 ### 1. Las capturas van en la carpeta `capturas/`
 
 Ahí está el detalle de cuáles faltan y qué tiene que mostrar cada una: ver
-[`capturas/FALTAN-ESTAS-3.md`](capturas/FALTAN-ESTAS-3.md).
+[`capturas/LEEME-capturas.md`](capturas/LEEME-capturas.md).
 
-Son 5 en total. Dos ya están guardadas; faltan tres.
+Son 4 y ya están todas guardadas y validadas. Se adjuntan juntas al mensaje de vibe.
 
 ⚠️ **Dos reglas que ya nos costaron una vuelta:**
 

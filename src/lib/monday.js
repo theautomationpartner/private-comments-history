@@ -32,10 +32,16 @@ export const COLS = {
     sourceColumn: "text_mm5p9arf",
     owner: "text_mm5pj9k9",
     originalTimestamp: "date_mm5pbkpp",
-    // Columna "Connect boards" (una vía) hacia Portfolio Overview - External.
-    // Es la que dice a qué proyecto pertenece cada entrada del historial.
+    // Columna "Connect boards" (una vía) hacia el board de proyectos.
+    // Es la que dice a qué proyecto pertenece cada entrada, y por la que filtra la app.
     // Se creó a mano desde la interfaz: la API de monday no permite crear este tipo.
     linkedItem: "board_relation_mm5pk9rd",
+    // ⚠️ Red de seguridad: el nombre del proyecto, en texto plano.
+    // Cuando se borra un ítem, monday BORRA el vínculo de la columna conectada y la entrada
+    // queda huérfana: nadie puede saber de qué proyecto era. Ya pasó en producción.
+    // Esta columna no la usa la app (el filtro sigue siendo por vínculo), pero deja el
+    // historial legible para una persona aunque el proyecto desaparezca.
+    sourceItem: "text_mm5q4sh",
   },
 };
 

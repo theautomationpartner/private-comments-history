@@ -164,10 +164,14 @@ function SummaryCard({ count, loading, isOwner, seccion }) {
 function Body({ state, entradas, section, onSection }) {
   return (
     <Flex gap="medium" align="start" wrap>
-      <Box style={{ flex: "1 1 180px", minWidth: 0, maxWidth: "100%" }}>
+      <Box style={{ flex: "1 1 200px", minWidth: 0, maxWidth: "100%" }}>
         <SectionNav active={section} onSelect={onSection} entries={state.entries} />
       </Box>
-      <Box style={{ flex: "3 1 320px", minWidth: 0 }}>
+      {/* El `basis` de 420px no es un ancho fijo: es el umbral a partir del cual el feed prefiere
+          apilarse debajo de la barra lateral en vez de seguir angostándose. Con un umbral chico
+          quedaba una franja de anchos (~500-600px, justo el panel de monday) donde no apilaba y
+          el texto se desbordaba. Mejor apilar antes que apretar. */}
+      <Box style={{ flex: "3 1 420px", minWidth: 0 }}>
         <Feed state={state} entradas={entradas} />
       </Box>
     </Flex>

@@ -28,6 +28,20 @@ body {
   margin: 0;
   background: var(--primary-background-color);
   color: var(--primary-text-color);
+  /* Red de seguridad: si algo se pasa de ancho, que no genere scroll horizontal de página.
+     Adentro de monday eso se ve como si la app estuviera rota. */
+  overflow-x: hidden;
+}
+
+/* Nada puede ser más ancho que su contenedor. Los textos largos sin espacios (una URL pegada
+   dentro de un comentario) son la causa clásica del desborde en un panel angosto. */
+.pch-row,
+.pch-card-wrap {
+  max-width: 100%;
+}
+
+.pch-card-wrap {
+  overflow-wrap: anywhere;
 }
 
 /* Circulito con el ícono adentro (el del contador y el del candado). */

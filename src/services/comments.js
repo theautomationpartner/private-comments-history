@@ -9,7 +9,12 @@ import mondayLib, { BOARDS, COLS, OWNER_EMAIL } from "../lib/monday";
 const OWNER_COLUMN = import.meta.env?.VITE_SOURCE_COLUMN || "Comments";
 
 /**
- * Las cuatro columnas del board de proyectos cuyo historial muestra la app.
+ * Las columnas del board de proyectos cuyo historial muestra la app.
+ *
+ * ⚠️ La app es SOLO para Yael: centraliza en una pantalla sus comentarios privados y los de las
+ * columnas que escribe todo el equipo, para que no tenga que mirar en dos lugares. El resto de
+ * la gente sigue leyendo esas columnas en los Updates del tablero, como siempre — por eso las
+ * automatizaciones viejas NO se apagan. Las dos vías conviven a propósito.
  *
  * `sourceColumn` tiene que coincidir EXACTAMENTE con el texto que la automatización de monday
  * escribe en la columna "Source Column" de cada entrada. Es el único vínculo entre una entrada
@@ -25,6 +30,7 @@ export const SECTIONS = [
   { key: "notes", label: "General Notes", sourceColumn: "General Notes" },
   { key: "actionPlan", label: "Action Plan", sourceColumn: "Action Plan" },
   { key: "keyRisk", label: "Key Risk", sourceColumn: "Key Risk" },
+  { key: "projectOwner", label: "Project Owner Comments", sourceColumn: "Project Owner Comments" },
 ];
 
 // ---- Datos de ejemplo (solo con VITE_MONDAY_MOCK=1) ----
@@ -62,6 +68,12 @@ const MOCK_ENTRIES = [
     createdAt: "2026-07-18T11:40:00Z",
     sourceColumn: "General Notes",
   },
+  {
+    id: "m6",
+    text: "Owner: waiting on the supplier quote before we can commit to the September window.",
+    createdAt: "2026-07-17T15:20:00Z",
+    sourceColumn: "Project Owner Comments",
+  },
 ];
 
 const MOCK_ITEM_NAME = "Sample project";
@@ -89,9 +101,7 @@ export async function getCommentHistory() {
   // técnica solo aparece con `npm run dev` (import.meta.env.DEV), nunca en el build desplegado.
   const itemId = ctx.itemId;
   if (!itemId) {
-    const pistaDeDev = import.meta.env?.DEV
-      ? " (dev: add ?itemId=<id> to the URL, e.g. ?itemId=<id>)"
-      : "";
+    const pistaDeDev = import.meta.env?.DEV ? " (dev: add ?itemId=<id> to the URL)" : "";
     return { entries: [], itemName: "", hasAccess: true, isOwner: true, noItem: true, pistaDeDev };
   }
 

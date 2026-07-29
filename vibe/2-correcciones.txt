@@ -1,0 +1,34 @@
+Cuatro cambios chicos. No reescribas la app: la lógica de datos (paginación, filtrado, fechas,
+orden) queda EXACTAMENTE como está.
+
+CAMBIO 1 — App.jsx, estado inicial del useState
+De:   noItem: true,
+A:    noItem: false,
+
+CAMBIO 2 — App.jsx, reemplazá la función applyTheme completa por esta:
+
+  const applyTheme = (theme) => {
+    const body = document.body;
+    body.classList.remove('light-app-theme', 'dark-app-theme', 'black-app-theme', 'dark');
+    if (theme === 'dark') body.classList.add('dark-app-theme', 'dark');
+    else if (theme === 'black') body.classList.add('black-app-theme', 'dark');
+    else body.classList.add('light-app-theme');
+  };
+
+CAMBIO 3 — App.jsx, agregale un .catch a la cadena de monday.get('context'):
+
+  monday.get('context')
+    .then((context) => { ...lo que ya hace, sin tocar... })
+    .catch((err) => {
+      if (!unmounted) setState(prev => ({ ...prev, loading: false, error: String(err) }));
+    });
+
+CAMBIO 4 — styles.css, agregá esta regla al final:
+
+  body {
+    margin: 0;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+Eso es todo. No agregues pantallas, botones ni nada que escriba en monday.
